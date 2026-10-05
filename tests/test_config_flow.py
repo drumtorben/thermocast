@@ -95,6 +95,85 @@ async def test_single_instance(hass: HomeAssistant, mock_entry: MockConfigEntry)
     assert result["reason"] == "single_instance_allowed"
 
 
+async def _reconfigure(hass: HomeAssistant, entry: MockConfigEntry, release_entity: str):
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_RECONFIGURE, "entry_id": entry.entry_id}
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "reconfigure"
+    return result, await hass.config_entries.flow.async_configure(
+        result["flow_id"], {**HOUSE_INPUT, CONF_RELEASE_ENTITY: release_entity}
+    )
+
+
+async def test_reconfigure_select_to_threshold(
+    hass: HomeAssistant, mock_entry: MockConfigEntry, mock_open_meteo
+) -> None:
+    """Wrong release entity picked at setup (summer/winter select): switch to the threshold, keep the zones."""
+    hass.states.async_set("select.season", "winter", {"options": ["summer", "winter"]})
+    mock_entry.add_to_hass(hass)
+    hass.config_entries.async_update_entry(
+        mock_entry,
+        data={**mock_entry.data, CONF_RELEASE_ENTITY: "select.season", CONF_RELEASE_ON: "winter",
+              CONF_RELEASE_OFF: "summer"},
+    )
+    assert await hass.config_entries.async_setup(mock_entry.entry_id)
+    await hass.async_block_till_done()
+
+    form, result = await _reconfigure(hass, mock_entry, "number.summer_threshold")
+    keys = {str(k): k for k in form["data_schema"].schema}
+    assert keys[CONF_RELEASE_ENTITY].description == {"suggested_value": "select.season"}
+    assert result["step_id"] == "release_values"
+    keys = {str(k): k for k in result["data_schema"].schema}
+    assert keys[CONF_RELEASE_ON].description is None  # other entity: old select options are no suggestion
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_RELEASE_ON: "16", CONF_RELEASE_OFF: "10"}
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+    await hass.async_block_till_done()
+
+    assert mock_entry.title == "Haus"
+    assert mock_entry.data[CONF_RELEASE_ENTITY] == "number.summer_threshold"
+    assert (mock_entry.data[CONF_RELEASE_ON], mock_entry.data[CONF_RELEASE_OFF]) == ("16", "10")
+    assert list(mock_entry.subentries) == ["zone_eg"]
+    assert mock_entry.runtime_data.actuator.entity_id == "number.summer_threshold"
+
+
+async def test_reconfigure_suggests_values_of_same_entity(
+    hass: HomeAssistant, mock_entry: MockConfigEntry, mock_open_meteo
+) -> None:
+    mock_entry.add_to_hass(hass)
+    _, result = await _reconfigure(hass, mock_entry, mock_entry.data[CONF_RELEASE_ENTITY])
+    keys = {str(k): k for k in result["data_schema"].schema}
+    assert keys[CONF_RELEASE_ON].description == {"suggested_value": "16"}
+    assert keys[CONF_RELEASE_OFF].description == {"suggested_value": "10"}
+
+
+async def test_reconfigure_releases_old_entity_when_controlling(
+    hass: HomeAssistant, mock_entry: MockConfigEntry, mock_open_meteo
+) -> None:
+    """Fail-safe: with control on, the old release entity is set to 'heating allowed' before the switch."""
+    mock_entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(mock_entry.entry_id)
+    await hass.async_block_till_done()
+    coordinator = mock_entry.runtime_data
+    coordinator.control_enabled = True
+    released: list[str] = []
+
+    async def force_on(*_args) -> None:
+        released.append(coordinator.actuator.entity_id)
+
+    with patch.object(coordinator.actuator, "async_force_on", force_on):
+        _, result = await _reconfigure(hass, mock_entry, "input_boolean.heating_allowed")
+        assert result["type"] is FlowResultType.ABORT
+        await hass.async_block_till_done()
+    # first the old entity, then (unload of the reload) the new one
+    assert released[0] == "input_number.summer_threshold"
+    assert CONF_RELEASE_ON not in mock_entry.data  # switch-type entities need no values
+
+
 async def test_options_flow(hass: HomeAssistant, mock_entry: MockConfigEntry, mock_open_meteo) -> None:
     mock_entry.add_to_hass(hass)
     result = await hass.config_entries.options.async_init(mock_entry.entry_id)

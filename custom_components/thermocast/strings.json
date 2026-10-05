@@ -12,7 +12,7 @@
           "release_entity": "Heat source release entity"
         },
         "data_description": {
-          "release_entity": "Entity that allows/blocks space heating, e.g. the RC310 summer/winter select of EMS-ESP.",
+          "release_entity": "Entity that allows/blocks space heating. Recommended: the RC310 summer threshold (number) of EMS-ESP with 16 = allowed, 10 = blocked – if Home Assistant fails, the controller resumes heating by itself once it gets cold. A summer/winter select also works but stays blocked if HA fails.",
           "heating_active_entity": "Heating circuit pump running (e.g. EMS-ESP heating pump) – better than burner state, because the screed keeps receiving heat during burner pauses. Recommended."
         }
       },
@@ -22,6 +22,21 @@
           "release_on_value": "Value = heating allowed",
           "release_off_value": "Value = heating blocked"
         }
+      },
+      "reconfigure": {
+        "title": "Change house & heat source",
+        "description": "Zones and learned models are kept. If you change the release entity while control is on, the old one is set to 'heating allowed' first.",
+        "data": {
+          "name": "Name",
+          "outdoor_sensor": "Outdoor temperature",
+          "flow_temp_sensor": "Flow temperature",
+          "heating_active_entity": "Heating pump running / heating active",
+          "release_entity": "Heat source release entity"
+        },
+        "data_description": {
+          "release_entity": "Entity that allows/blocks space heating. Recommended: the RC310 summer threshold (number) of EMS-ESP with 16 = allowed, 10 = blocked – if Home Assistant fails, the controller resumes heating by itself once it gets cold. A summer/winter select also works but stays blocked if HA fails.",
+          "heating_active_entity": "Heating circuit pump running (e.g. EMS-ESP heating pump) – better than burner state, because the screed keeps receiving heat during burner pauses. Recommended."
+        }
       }
     },
     "error": {
@@ -29,7 +44,8 @@
       "not_a_number": "Both values must be numbers."
     },
     "abort": {
-      "single_instance_allowed": "Only one Thermocast house is supported."
+      "single_instance_allowed": "Only one Thermocast house is supported.",
+      "reconfigure_successful": "House settings updated."
     }
   },
   "config_subentries": {

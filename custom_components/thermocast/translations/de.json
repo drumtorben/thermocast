@@ -12,7 +12,7 @@
           "release_entity": "Entität für die Heizfreigabe"
         },
         "data_description": {
-          "release_entity": "Entität, die Raumheizung erlaubt/sperrt, z. B. Sommer/Winter-Auswahl des RC310 in EMS-ESP.",
+          "release_entity": "Entität, die Raumheizung erlaubt/sperrt. Empfohlen: die Sommerschwelle des RC310 (number) in EMS-ESP mit 16 = erlaubt, 10 = gesperrt – fällt Home Assistant aus, heizt der Regler bei Kälte von selbst wieder. Die Sommer/Winter-Auswahl geht auch, bleibt bei einem HA-Ausfall aber gesperrt.",
           "heating_active_entity": "Heizungspumpe läuft (z. B. EMS-ESP Heizungspumpe) – besser als der Brennerstatus, weil der Estrich auch in Brennerpausen Wärme bekommt. Empfohlen."
         }
       },
@@ -22,6 +22,21 @@
           "release_on_value": "Wert = Heizen erlaubt",
           "release_off_value": "Wert = Heizen gesperrt"
         }
+      },
+      "reconfigure": {
+        "title": "Haus & Wärmequelle ändern",
+        "description": "Zonen und gelernte Modelle bleiben erhalten. Änderst du die Freigabe-Entität bei aktiver Steuerung, wird die alte vorher auf „Heizen erlaubt“ gesetzt.",
+        "data": {
+          "name": "Name",
+          "outdoor_sensor": "Außentemperatur",
+          "flow_temp_sensor": "Vorlauftemperatur",
+          "heating_active_entity": "Heizungspumpe läuft / Heizung aktiv",
+          "release_entity": "Entität für die Heizfreigabe"
+        },
+        "data_description": {
+          "release_entity": "Entität, die Raumheizung erlaubt/sperrt. Empfohlen: die Sommerschwelle des RC310 (number) in EMS-ESP mit 16 = erlaubt, 10 = gesperrt – fällt Home Assistant aus, heizt der Regler bei Kälte von selbst wieder. Die Sommer/Winter-Auswahl geht auch, bleibt bei einem HA-Ausfall aber gesperrt.",
+          "heating_active_entity": "Heizungspumpe läuft (z. B. EMS-ESP Heizungspumpe) – besser als der Brennerstatus, weil der Estrich auch in Brennerpausen Wärme bekommt. Empfohlen."
+        }
       }
     },
     "error": {
@@ -29,7 +44,8 @@
       "not_a_number": "Beide Werte müssen Zahlen sein."
     },
     "abort": {
-      "single_instance_allowed": "Es wird nur ein Thermocast-Haus unterstützt."
+      "single_instance_allowed": "Es wird nur ein Thermocast-Haus unterstützt.",
+      "reconfigure_successful": "Haus-Einstellungen geändert."
     }
   },
   "config_subentries": {

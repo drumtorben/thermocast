@@ -96,3 +96,15 @@ async def test_state_roundtrip(hass: HomeAssistant) -> None:
     other, _ = _actuator(hass)
     other.load(act.to_dict())
     assert other.to_dict() == act.to_dict() and other.last_write_target is False
+
+
+async def test_reconfigured_entity_drops_pending_write(hass: HomeAssistant) -> None:
+    async_mock_service(hass, "number", "set_value")
+    hass.states.async_set("number.summer_threshold", "16")
+    act, _ = _actuator(hass)
+    await act.async_apply(False, True, T0)
+    stored = {**act.to_dict(), "entity": "select.season", "write_failures": 3}  # written for the old entity
+    other, _ = _actuator(hass)
+    other.load(stored)
+    assert other.last_write_target is None and other.last_write_at is None and other.write_failures == 0
+    assert other.commanded is False and other.writes_today == 1  # switching state + EEPROM budget stay

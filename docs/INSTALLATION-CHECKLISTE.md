@@ -30,6 +30,8 @@ sind typische EMS-ESP-Namen und **nur Beispiele** – in *Entwicklerwerkzeuge �
 - [ ] `custom_components/thermocast` nach `config/custom_components/` kopieren (später: HACS-Custom-Repo).
 - [ ] HA neu starten → *Einstellungen → Geräte & Dienste → Integration hinzufügen → Thermocast*.
 - [ ] Haus: Außentemperatur, Vorlauf, **Heizungspumpe** (empfohlen), Freigabe = RC310-Schwelle, Werte **16 / 10**.
+      Falsch gewählt (z. B. die Sommer/Winter-Auswahl statt der Schwelle)? *Thermocast → ⋮ → Rekonfigurieren* –
+      Zonen und gelernte Modelle bleiben erhalten.
 
 ## 4. Zonen anlegen („Zone hinzufügen“)
 

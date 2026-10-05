@@ -5,6 +5,7 @@ from typing import Any
 
 import voluptuous as vol
 from homeassistant.config_entries import (
+    SOURCE_RECONFIGURE,
     ConfigEntry,
     ConfigFlow,
     ConfigFlowResult,
@@ -185,6 +186,17 @@ class ThermocastConfigFlow(ConfigFlow, domain=DOMAIN):
             return self._create()
         return self.async_show_form(step_id="user", data_schema=HOUSE_SCHEMA)
 
+    async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Change sensors or the release entity/values; zones and learned models are kept."""
+        entry = self._get_reconfigure_entry()
+        if user_input is not None:
+            self._data = dict(user_input)
+            if user_input[CONF_RELEASE_ENTITY].split(".")[0] in SELECT_DOMAINS + NUMBER_DOMAINS:
+                return await self.async_step_release_values()
+            return await self._update()
+        schema = self.add_suggested_values_to_schema(HOUSE_SCHEMA, {**entry.data, CONF_NAME: entry.title})
+        return self.async_show_form(step_id="reconfigure", data_schema=schema)
+
     async def async_step_release_values(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """For select entities: which option means 'heating allowed' / 'blocked'."""
         errors: dict[str, str] = {}
@@ -201,6 +213,8 @@ class ThermocastConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors["base"] = "same_release_values"
             else:
                 self._data.update(user_input)
+                if self.source == SOURCE_RECONFIGURE:
+                    return await self._update()
                 return self._create()
         entity_id = self._data[CONF_RELEASE_ENTITY]
         state = self.hass.states.get(entity_id)
@@ -214,11 +228,28 @@ class ThermocastConfigFlow(ConfigFlow, domain=DOMAIN):
         else:
             option_sel = selector.TextSelector()
         schema = vol.Schema({vol.Required(CONF_RELEASE_ON): option_sel, vol.Required(CONF_RELEASE_OFF): option_sel})
+        if self.source == SOURCE_RECONFIGURE:
+            old = self._get_reconfigure_entry().data
+            if old.get(CONF_RELEASE_ENTITY) == entity_id:  # same entity: keep its values as suggestion
+                schema = self.add_suggested_values_to_schema(
+                    schema, {k: old[k] for k in (CONF_RELEASE_ON, CONF_RELEASE_OFF) if k in old}
+                )
         return self.async_show_form(step_id="release_values", data_schema=schema, errors=errors)
 
     def _create(self) -> ConfigFlowResult:
         title = self._data.pop(CONF_NAME, "Thermocast")
         return self.async_create_entry(title=title, data=self._data, options={})
+
+    async def _update(self) -> ConfigFlowResult:
+        entry = self._get_reconfigure_entry()
+        title = self._data.pop(CONF_NAME, entry.title)
+        old_release = {k: entry.data.get(k) for k in (CONF_RELEASE_ENTITY, CONF_RELEASE_ON, CONF_RELEASE_OFF)}
+        new_release = {k: self._data.get(k) for k in old_release}
+        coordinator = getattr(entry, "runtime_data", None)
+        if old_release != new_release and coordinator is not None and coordinator.control_enabled:
+            # fail-safe: never leave the old release entity blocked behind
+            await coordinator.actuator.async_force_on()
+        return self.async_update_and_abort(entry, title=title, data=self._data)  # update listener reloads
 
     @staticmethod
     @callback

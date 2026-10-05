@@ -77,6 +77,7 @@ class Actuator:
             "last_write_at": self.last_write_at.isoformat() if self.last_write_at else None,
             "write_failures": self.write_failures,
             "writes_today": self.writes_today,
+            "entity": self.entity_id,
         }
 
     def load(self, data: dict[str, Any]) -> None:
@@ -91,6 +92,10 @@ class Actuator:
         self.last_write_at = datetime.fromisoformat(lw) if lw else None
         self.write_failures = int(data.get("write_failures", 0))
         self.writes_today = int(data.get("writes_today", 0))
+        if data.get("entity") not in (None, self.entity_id):
+            # release entity was reconfigured: a pending write or backoff belonged to the old one
+            self.last_write_target = self.last_write_at = None
+            self.write_failures = 0
 
     # ----------------------------------------------------------------- config
     def _opt(self, key: str, default: float) -> float:
