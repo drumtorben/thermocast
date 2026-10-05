@@ -1,6 +1,6 @@
 [project]
 name = "thermocast"
-version = "0.4.5"
+version = "0.4.6"
 description = "Predictive heating release for Home Assistant with online-learned room models"
 requires-python = ">=3.14.2"  # same as current Home Assistant
 license = "MIT"

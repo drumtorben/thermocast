@@ -50,12 +50,21 @@ def release_state(value: str | None, domain: str, on_value: str | None, off_valu
     return value == "on"
 
 
+_ON = frozenset({"on", "true", "an", "ein", "yes", "ja"})
+_OFF = frozenset({"off", "false", "aus", "no", "nein"})
+
+
 def binary_value(value: str | None) -> float | None:
-    """on/off or numeric (> 0 = on) state -> 1.0 / 0.0, None if unknown."""
-    if value == "on":
-        return 1.0
-    if value == "off":
-        return 0.0
+    """on/off or numeric (> 0 = on) state -> 1.0 / 0.0, None if unknown.
+
+    Also accepts the boolean formats of gateways that publish plain sensors (EMS-ESP: ON/OFF, true/false, an/aus).
+    """
+    if isinstance(value, str):
+        word = value.strip().lower()
+        if word in _ON:
+            return 1.0
+        if word in _OFF:
+            return 0.0
     try:
         v = float(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):

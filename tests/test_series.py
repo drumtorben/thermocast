@@ -44,3 +44,13 @@ def test_pump_minus_dhw_charging():
     assert hourly_fraction(heating, HOURS[:2], end, binary_value) == [0.75, round(10 / 40, 3)]
     assert mask_off(pump, [], binary_value) == pump
     assert mask_off([], dhw, binary_value) == []
+
+
+def test_gateway_boolean_formats():
+    """EMS-ESP publishes booleans as ON/OFF, true/false or (German locale) an/aus."""
+    for on in ("on", "ON", "true", "an", "Ein", "1", "2.5"):
+        assert binary_value(on) == 1.0, on
+    for off in ("off", "OFF", "false", "aus", "0"):
+        assert binary_value(off) == 0.0, off
+    for unknown in ("unavailable", "unknown", "", None):
+        assert binary_value(unknown) is None

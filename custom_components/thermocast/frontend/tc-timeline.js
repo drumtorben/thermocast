@@ -252,12 +252,14 @@ class TcTimeline extends LitElement {
         ? svg`<rect x=${this._x(i)} y=${20 - 14 * a} width=${this._pph} height=${14 * a} fill=${C.heat}></rect>`
         : nothing,
     );
-    const dhw = (v.heating.dhw || []).map((a, i) =>
-      i <= now && isNum(a) && a > 0
-        ? svg`<rect x=${this._x(i)} y=${20 - 14 * a} width=${this._pph} height=${14 * a} fill="url(#tc-dhw)"
-            stroke=${C.loss} stroke-width="0.6"><title>${t(this.lang, "dhw")} ${Math.round(a * 100)} %</title></rect>`
-        : nothing,
-    );
+    // hot water is not space heating: stacked on top of the heating bar, at least 3 px so short charges show
+    const dhw = (v.heating.dhw || []).map((a, i) => {
+      if (!(i <= now && isNum(a) && a > 0)) return nothing;
+      const below = isNum(v.heating.actual[i]) ? 14 * v.heating.actual[i] : 0;
+      const hd = Math.max(3, 14 * a);
+      return svg`<rect x=${this._x(i)} y=${20 - below - hd} width=${this._pph} height=${hd} fill="url(#tc-dhw)"
+            stroke=${C.loss} stroke-width="0.6"><title>${t(this.lang, "dhw")} ${Math.round(a * 100)} %</title></rect>`;
+    });
     const defs = svg`<defs><pattern id="tc-dhw" width="5" height="5" patternUnits="userSpaceOnUse"
       patternTransform="rotate(45)"><rect width="2" height="5" fill=${C.loss}></rect></pattern></defs>`;
     const planned = v.heating.planned_blocks.map((b) => {

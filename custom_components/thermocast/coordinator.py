@@ -59,6 +59,7 @@ from .core.model import HourRecord, OnlineZoneModel, SurfaceSpec, ZoneSpec
 from .core.planner import PlanResult, ZonePlanInput, plan
 from .core.quality import ForecastLog, RingLog, calibration, measured_by_hour, param_snapshot, std_scale_profile
 from .core.rollout import block_lengths_for
+from .core.rules import binary_value
 from .events import EventLog
 from .view_builder import ViewBuilder
 
@@ -76,17 +77,16 @@ def _num(hass: HomeAssistant, entity_id: str | None) -> float | None:
     st = hass.states.get(entity_id)
     if st is None:
         return None
-    if st.state in ("on", "off"):
-        return 1.0 if st.state == "on" else 0.0
     try:
         v = float(st.state)
     except (TypeError, ValueError):
-        return None
+        return binary_value(st.state)  # on/off, true/false, an/aus … -> 1.0 / 0.0
     return v if math.isfinite(v) else None
 
 
 def _is_on(hass: HomeAssistant, entity_id: str | None) -> bool | None:
-    v = _num(hass, entity_id)
+    st = hass.states.get(entity_id) if entity_id else None
+    v = binary_value(st.state) if st is not None else None
     return None if v is None else v > 0
 
 
