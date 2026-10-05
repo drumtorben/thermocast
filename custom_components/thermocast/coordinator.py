@@ -491,7 +491,7 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
         self._failsafe_active = bool(failsafe)
         self._update_failsafe_issue(now, failsafe)
         want_heat = True if failsafe else result["want_heat"]
-        release, override = await self.actuator.async_apply(want_heat, self.control_enabled, now)
+        release, override = await self.actuator.async_apply(want_heat, self.control_enabled, now, forced=bool(failsafe))
         if failsafe:
             override = "failsafe"
         age = (now - self.forecast.fetched_at).total_seconds() / 60 if self.forecast and self.forecast.fetched_at else None

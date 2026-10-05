@@ -56,6 +56,7 @@ class Actuator:
         self.switches_today = 0
         self.day: date | None = None
         self.last_decision: bool | None = None
+        self.forced = False  # ON only because of a fail-safe (no minimum block owed)
         # write verification
         self.last_write_target: bool | None = None  # pending (unconfirmed) write
         self.last_write_at: datetime | None = None
@@ -78,6 +79,7 @@ class Actuator:
             "write_failures": self.write_failures,
             "writes_today": self.writes_today,
             "entity": self.entity_id,
+            "forced": self.forced,
         }
 
     def load(self, data: dict[str, Any]) -> None:
@@ -92,6 +94,7 @@ class Actuator:
         self.last_write_at = datetime.fromisoformat(lw) if lw else None
         self.write_failures = int(data.get("write_failures", 0))
         self.writes_today = int(data.get("writes_today", 0))
+        self.forced = bool(data.get("forced", False))
         if data.get("entity") not in (None, self.entity_id):
             # release entity was reconfigured: a pending write or backoff belonged to the old one
             self.last_write_target = self.last_write_at = None
@@ -185,8 +188,14 @@ class Actuator:
         return True
 
     # ------------------------------------------------------------------ logic
-    async def async_apply(self, want_on: bool, enabled: bool, now: datetime) -> tuple[bool, str | None]:
-        """Apply the planner decision. Returns (intended release state, reason it differs from the planner)."""
+    async def async_apply(
+        self, want_on: bool, enabled: bool, now: datetime, forced: bool = False
+    ) -> tuple[bool, str | None]:
+        """Apply the planner decision. Returns (intended release state, reason it differs from the planner).
+
+        ``forced`` (fail-safe): heating allowed immediately, past any minimum pause – but it is not a planned
+        block, so once the fail-safe ends the planner may switch off again without serving a minimum block.
+        """
         self.last_decision = want_on
         if not enabled:
             return want_on, "observe"  # observe mode: never touch the heat source
@@ -195,7 +204,14 @@ class Actuator:
         known = self.entity_is_on()
         self._check_confirmation(known)
         current = known if known is not None else (self.commanded if self.commanded is not None else True)
-        target, reason = apply_rules(want_on, current, self.elapsed_h(now), self.switches_today, self.rules)
+        if forced:
+            if not current:
+                await self._try_write(True, now)
+            self.commanded, self.forced = True, True
+            return True, "failsafe"
+        elapsed = math.inf if self.forced and current else self.elapsed_h(now)
+        self.forced = False
+        target, reason = apply_rules(want_on, current, elapsed, self.switches_today, self.rules)
         if target != current:
             if self.commanded != target:  # a new switching decision (not a retry)
                 self.last_change = now
@@ -212,7 +228,7 @@ class Actuator:
         self._check_confirmation(known)
         if known is not True:
             await self._try_write(True, now)
-        self.commanded = True
+        self.commanded, self.forced = True, True
 
     async def _write(self, on: bool) -> None:
         domain = self.entity_id.split(".")[0]

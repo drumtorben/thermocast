@@ -75,6 +75,8 @@ class ViewBuilder:
         today = dt_util.as_local(now).date()
         if self._shadow_day != today:
             self._shadow_day, self._shadow_switches = today, 0
+        if data.failsafe_reason:
+            return  # a fail-safe allows heating but is no planned block (the real actuator owes no minimum block)
         elapsed = (now - self._shadow_change).total_seconds() / 3600 if self._shadow_change else math.inf
         target, _ = apply_rules(data.want_heat, self._shadow_on, elapsed, self._shadow_switches, self._c.actuator.rules)
         if target != self._shadow_on:

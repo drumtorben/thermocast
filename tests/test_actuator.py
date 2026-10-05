@@ -13,11 +13,11 @@ from custom_components.thermocast.const import CONF_RELEASE_ENTITY, CONF_RELEASE
 T0 = datetime(2026, 10, 4, 10, 0, tzinfo=UTC)
 
 
-def _actuator(hass: HomeAssistant) -> tuple[Actuator, list]:
+def _actuator(hass: HomeAssistant, options: dict | None = None) -> tuple[Actuator, list]:
     entry = MockConfigEntry(
         domain=DOMAIN,
         data={CONF_RELEASE_ENTITY: "number.summer_threshold", CONF_RELEASE_ON: "16", CONF_RELEASE_OFF: "10"},
-        options={"min_block_hours": 0, "min_pause_hours": 0, "max_switches_per_day": 999},
+        options=options or {"min_block_hours": 0, "min_pause_hours": 0, "max_switches_per_day": 999},
     )
     act = Actuator(hass, entry)
     events: list = []
@@ -96,6 +96,25 @@ async def test_state_roundtrip(hass: HomeAssistant) -> None:
     other, _ = _actuator(hass)
     other.load(act.to_dict())
     assert other.to_dict() == act.to_dict() and other.last_write_target is False
+
+
+async def test_failsafe_overrides_pause_and_owes_no_block(hass: HomeAssistant) -> None:
+    async def follow(call):  # the entity takes every written value
+        hass.states.async_set("number.summer_threshold", str(int(call.data["value"])))
+
+    hass.services.async_register("number", "set_value", follow)
+    hass.states.async_set("number.summer_threshold", "16")
+    act, _ = _actuator(hass, {"min_block_hours": 3, "min_pause_hours": 2, "max_switches_per_day": 12})
+    await act.async_apply(False, True, T0)  # OFF -> minimum pause of 2 h starts
+    assert hass.states.get("number.summer_threshold").state == "10"
+
+    # fail-safe 30 min later: heating allowed at once, despite the minimum pause
+    on, reason = await act.async_apply(True, True, T0 + timedelta(minutes=30), forced=True)
+    assert (on, reason) == (True, "failsafe") and hass.states.get("number.summer_threshold").state == "16"
+
+    # fail-safe over, planner does not want heat: no 3 h minimum block is owed
+    on, reason = await act.async_apply(False, True, T0 + timedelta(minutes=45))
+    assert (on, reason) == (False, None) and hass.states.get("number.summer_threshold").state == "10"
 
 
 async def test_reconfigured_entity_drops_pending_write(hass: HomeAssistant) -> None:
