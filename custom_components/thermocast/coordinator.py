@@ -305,7 +305,11 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
             z.std_scale = ()
             return
         since = dt_util.utcnow() - timedelta(days=CALIBRATION_DAYS)
-        factors = calibration(z.flog, measured_by_hour(z.log.to_list()), since)
+        try:
+            factors = calibration(z.flog, measured_by_hour(z.log.to_list()), since)
+        except Exception:  # diagnostics must never keep the integration from starting
+            _LOGGER.exception("Thermocast: σ calibration failed for zone %s, using the raw σ", z.title)
+            factors = {}
         z.std_scale = std_scale_profile(factors)
 
     def _build_zone(self, sub: ConfigSubentry, forgetting: float) -> ZoneRuntime:

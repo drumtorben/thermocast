@@ -22,6 +22,11 @@ HORIZONS: tuple[int, ...] = (1, 3, 6, 12, 24)
 LOG_HOURS = 14 * 24
 
 
+def _finite(x: Any) -> float | None:
+    """A stored number, or None for missing/NaN (HA's JSON store writes NaN as null)."""
+    return float(x) if isinstance(x, int | float) and math.isfinite(x) else None
+
+
 class RingLog:
     """Bounded list of JSON-serialisable entries (oldest dropped first)."""
 
@@ -63,8 +68,8 @@ class ForecastLog:
         entry = self._d.get((target - k * HOUR).isoformat())
         if not entry or str(k) not in entry:
             return None
-        mean, std = entry[str(k)]
-        return mean, std
+        mean, std = (_finite(x) for x in entry[str(k)])
+        return None if mean is None or std is None else (mean, std)
 
     def to_dict(self) -> dict[str, dict[str, list[float]]]:
         return dict(self._d)
@@ -130,7 +135,7 @@ def hindcast_metrics(
         hc[i]["mean"] - entries[i]["temp_next"]
         for i in _since(entries, since)
         if hc[i] is not None and entries[i]["rec"].get("valid", True)
-        and entries[i]["temp_next"] is not None and math.isfinite(entries[i]["temp_next"])
+        and _finite(entries[i].get("temp_next")) is not None
     ]
     if not diffs:
         return {"n": 0, "mae": None, "bias": None}
@@ -142,10 +147,10 @@ def measured_by_hour(entries: list[dict[str, Any]]) -> dict[datetime, float]:
     out: dict[datetime, float] = {}
     for e in entries:
         t = datetime.fromisoformat(e["t"])
-        if math.isfinite(e["rec"]["temp"]):
-            out[t] = e["rec"]["temp"]
-        if e.get("temp_next") is not None and math.isfinite(e["temp_next"]):
-            out[t + HOUR] = e["temp_next"]
+        if (temp := _finite(e["rec"].get("temp"))) is not None:
+            out[t] = temp
+        if (temp := _finite(e.get("temp_next"))) is not None:
+            out[t + HOUR] = temp
     return out
 
 
@@ -357,7 +362,7 @@ def zone_quality(z: QualityInput, tz: tzinfo, now: datetime, days: int = 7) -> d
         if datetime.fromisoformat(e["t"]) < since:
             continue
         end = datetime.fromisoformat(e["t"]) + HOUR
-        meas = e["temp_next"]
+        meas = _finite(e.get("temp_next"))
         sim = hc[i]["mean"] if hc[i] else None
         pred = z.flog.predicted(end, 6)
         hours.append(end.isoformat())

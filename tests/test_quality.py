@@ -14,6 +14,7 @@ from core.model import OnlineZoneModel, Prediction
 from core.quality import (
     ForecastLog,
     RingLog,
+    calibration,
     forecast_metrics,
     heat_lag_profile,
     hindcast,
@@ -111,6 +112,28 @@ def test_measured_by_hour():
     mb = measured_by_hour(entries)
     assert mb[T0] == entries[0]["rec"]["temp"]
     assert mb[T0 + timedelta(hours=3)] == entries[2]["temp_next"]
+
+
+def test_stored_nulls_are_missing_values():
+    """Warm start logs gaps as None and HA's store turns NaN into null – nothing may crash on that."""
+    sim = simulate(days=35, seed=4)
+    entries = _entries(sim, 30 * 24, 4)
+    entries[1]["rec"]["temp"] = None
+    entries[2]["temp_next"] = None
+    entries[3]["rec"]["temp"] = float("nan")
+    mb = measured_by_hour(entries)
+    assert T0 + timedelta(hours=3) not in mb  # start null (NaN) and previous end null
+    assert mb[T0 + timedelta(hours=1)] == entries[0]["temp_next"]  # start null, but the previous end counts
+    assert mb[T0 + timedelta(hours=2)] == entries[1]["temp_next"]
+
+    flog = ForecastLog()
+    flog.load({T0.isoformat(): {"1": [None, 0.1], "3": [20.0, None], "6": [20.0, 0.2]}})
+    assert flog.predicted(T0 + timedelta(hours=1), 1) is None
+    assert flog.predicted(T0 + timedelta(hours=3), 3) is None
+    assert flog.predicted(T0 + timedelta(hours=6), 6) == (20.0, 0.2)
+    assert calibration(flog, {T0 + timedelta(hours=1): 20.0}, since=None) == {k: 1.0 for k in (1, 3, 6, 12, 24)}
+    hc = hindcast(trained_model(), entries, TZ)
+    assert hc[1] is None and hindcast_metrics(entries, hc, since=None)["n"] >= 1
 
 
 def test_interpret_and_lags():

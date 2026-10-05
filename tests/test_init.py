@@ -41,6 +41,29 @@ def _eid(hass: HomeAssistant, unique_id: str, platform: str) -> str:
     return entity_id
 
 
+async def test_setup_with_null_temperatures_in_stored_log(
+    hass: HomeAssistant, mock_entry, mock_open_meteo, hass_storage
+) -> None:
+    """Regression: a warm-start log with gaps (temp = null) crashed the setup in the σ calibration."""
+    from homeassistant.util import dt as dt_util
+
+    from custom_components.thermocast.coordinator import STORAGE_VERSION
+
+    hour = dt_util.utcnow().replace(minute=0, second=0, microsecond=0) - timedelta(hours=3)
+    rec = {"t_out": 8.0, "temp": None, "irr": [], "q": 0.0, "neighbors": [], "gains": [], "valid": True}
+    hass_storage[f"{DOMAIN}.{mock_entry.entry_id}.logs"] = {
+        "version": STORAGE_VERSION,
+        "key": f"{DOMAIN}.{mock_entry.entry_id}.logs",
+        "data": {"zones": {"zone_eg": {
+            "log": [{"t": hour.isoformat(), "rec": rec, "temp_next": None, "err": None}],
+            "flog": {hour.isoformat(): {"1": [None, None]}},
+            "params": [],
+        }}},
+    }
+    await _setup_states(hass)
+    await _setup_entry(hass, mock_entry)
+
+
 async def test_setup_creates_entities(hass: HomeAssistant, mock_entry, mock_open_meteo) -> None:
     await _setup_states(hass)
     await _setup_entry(hass, mock_entry)
