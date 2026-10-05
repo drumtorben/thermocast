@@ -1,0 +1,14 @@
+{
+  "domain": "thermocast",
+  "name": "Thermocast",
+  "after_dependencies": ["recorder"],
+  "codeowners": ["@drumtorben"],
+  "config_flow": true,
+  "dependencies": ["frontend", "http", "panel_custom", "websocket_api"],
+  "documentation": "https://github.com/drumtorben/thermocast",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/drumtorben/thermocast/issues",
+  "requirements": ["numpy>=1.26"],
+  "version": "0.4.0"
+}

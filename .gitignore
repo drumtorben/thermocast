@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# local HA dev instance: keep only the configuration
+config/*
+!config/configuration.yaml
+.superpowers/
+custom_components/thermocast/frontend/dev/live-view.json
+
+# private, house-specific context (never published)
+CLAUDE.local.md
+docs/local/

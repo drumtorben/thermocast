@@ -1,0 +1,125 @@
+# Local development instance: uv run hass -c config  → http://localhost:8123
+# custom_components/ is linked into this directory by scripts/develop.
+homeassistant:
+  name: Thermocast Dev
+  latitude: 52.52   # example location (Berlin) – the dev instance needs some coordinates
+  longitude: 13.40
+  elevation: 30
+  unit_system: metric
+  time_zone: Europe/Berlin
+  country: DE
+
+# lean instead of default_config (avoids bluetooth/ffmpeg noise on macOS)
+frontend:
+config:
+history:
+logbook:
+system_health:
+
+logger:
+  default: info
+  logs:
+    custom_components.thermocast: debug
+
+# Fake house: move the sliders to play with the planner.
+input_number:
+  outdoor_temp:
+    name: Outdoor temperature
+    min: -15
+    max: 30
+    step: 0.5
+    initial: 5
+    unit_of_measurement: "°C"
+  flow_temp:
+    name: Flow temperature
+    min: 20
+    max: 60
+    step: 0.5
+    initial: 35
+    unit_of_measurement: "°C"
+  living_temp:
+    name: Living room temperature
+    min: 15
+    max: 25
+    step: 0.1
+    initial: 20.5
+    unit_of_measurement: "°C"
+  bedroom_temp:
+    name: Bedroom temperature
+    min: 15
+    max: 25
+    step: 0.1
+    initial: 19.5
+    unit_of_measurement: "°C"
+  summer_threshold:
+    name: RC310 summer threshold
+    min: 5
+    max: 25
+    step: 1
+    initial: 16
+    unit_of_measurement: "°C"
+  energy_heating_total:
+    name: Heating energy total
+    min: 0
+    max: 100000
+    step: 0.5
+    initial: 0
+    mode: box
+    unit_of_measurement: "kWh"
+
+input_boolean:
+  heating_pump:
+    name: Heating pump running
+  dhw_active:
+    name: Hot water charging
+
+# Counters for the KPI tab (press the buttons to count).
+counter:
+  burner_starts:
+    name: Burner starts counter
+    step: 1
+
+template:
+  - sensor:
+      # state_class -> recorder long-term statistics (needed by the KPI tab)
+      - name: Outdoor
+        unique_id: dev_outdoor
+        device_class: temperature
+        state_class: measurement
+        unit_of_measurement: "°C"
+        state: "{{ states('input_number.outdoor_temp') }}"
+      - name: Flow
+        unique_id: dev_flow
+        device_class: temperature
+        state_class: measurement
+        unit_of_measurement: "°C"
+        state: "{{ states('input_number.flow_temp') }}"
+      - name: Living
+        unique_id: dev_living
+        device_class: temperature
+        state_class: measurement
+        unit_of_measurement: "°C"
+        state: "{{ states('input_number.living_temp') }}"
+      - name: Bedroom
+        unique_id: dev_bedroom
+        device_class: temperature
+        state_class: measurement
+        unit_of_measurement: "°C"
+        state: "{{ states('input_number.bedroom_temp') }}"
+      - name: Burner starts
+        unique_id: dev_burner_starts
+        state_class: total_increasing
+        state: "{{ states('counter.burner_starts') }}"
+      - name: Energy heating
+        unique_id: dev_energy_heating
+        device_class: energy
+        state_class: total_increasing
+        unit_of_measurement: "kWh"
+        state: "{{ states('input_number.energy_heating_total') }}"
+  - binary_sensor:
+      - name: Heating pump
+        unique_id: dev_heating_pump
+        state: "{{ is_state('input_boolean.heating_pump', 'on') }}"
+      - name: DHW active
+        unique_id: dev_dhw_active
+        state: "{{ is_state('input_boolean.dhw_active', 'on') }}"

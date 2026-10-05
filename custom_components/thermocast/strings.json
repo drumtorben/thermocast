@@ -1,0 +1,185 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "House & heat source",
+        "description": "Thermocast starts in observe mode: it only forecasts until you enable control.",
+        "data": {
+          "name": "Name",
+          "outdoor_sensor": "Outdoor temperature",
+          "flow_temp_sensor": "Flow temperature",
+          "heating_active_entity": "Heating pump running / heating active",
+          "release_entity": "Heat source release entity"
+        },
+        "data_description": {
+          "release_entity": "Entity that allows/blocks space heating, e.g. the RC310 summer/winter select of EMS-ESP.",
+          "heating_active_entity": "Heating circuit pump running (e.g. EMS-ESP heating pump) – better than burner state, because the screed keeps receiving heat during burner pauses. Recommended."
+        }
+      },
+      "release_values": {
+        "title": "Release values",
+        "data": {
+          "release_on_value": "Value = heating allowed",
+          "release_off_value": "Value = heating blocked"
+        }
+      }
+    },
+    "error": {
+      "same_release_values": "Both values must differ.",
+      "not_a_number": "Both values must be numbers."
+    },
+    "abort": {
+      "single_instance_allowed": "Only one Thermocast house is supported."
+    }
+  },
+  "config_subentries": {
+    "zone": {
+      "entry_type": "Zone",
+      "initiate_flow": {
+        "user": "Add zone"
+      },
+      "step": {
+        "user": {
+          "title": "Zone",
+          "data": {
+            "name": "Name",
+            "heat_type": "Heating type",
+            "temp_sensors": "Temperature sensors",
+            "valve_entity": "Valve opening (radiators)",
+            "comfort_temp": "Comfort temperature",
+            "comfort_band": "Allowed undershoot",
+            "active_from": "Comfort from",
+            "active_to": "Comfort until",
+            "leads_release": "Leads the heat source release",
+            "surfaces": "Sun-exposed surfaces",
+            "neighbor_sensors": "Neighbour temperature sensors",
+            "gain_entities": "Internal heat gains",
+            "window_entities": "Window/door contacts",
+            "comfort_schedule": "Comfort schedule (optional)"
+          },
+          "data_description": {
+            "surfaces": "YAML list, e.g. [{kind: window, azimuth: 90, tilt: 90}, {kind: roof, azimuth: 180, tilt: 40}]. Azimuth: 0=N, 90=E, 180=S, 270=W.",
+            "leads_release": "If on, this zone's comfort decides when the boiler may heat.",
+            "valve_entity": "Only for radiators: % opening sensor of the TRV.",
+            "gain_entities": "Power sensors (W), presence or on/off entities that add heat.",
+            "neighbor_sensors": "Temperatures of adjacent rooms (heat exchange is learned).",
+            "comfort_schedule": "A schedule helper (e.g. weekdays 8–17 for the office). When set, it replaces 'Comfort from/until'."
+          }
+        },
+        "reconfigure": {
+          "title": "Zone",
+          "data": {
+            "name": "Name",
+            "heat_type": "Heating type",
+            "temp_sensors": "Temperature sensors",
+            "valve_entity": "Valve opening (radiators)",
+            "comfort_temp": "Comfort temperature",
+            "comfort_band": "Allowed undershoot",
+            "active_from": "Comfort from",
+            "active_to": "Comfort until",
+            "leads_release": "Leads the heat source release",
+            "surfaces": "Sun-exposed surfaces",
+            "neighbor_sensors": "Neighbour temperature sensors",
+            "gain_entities": "Internal heat gains",
+            "window_entities": "Window/door contacts",
+            "comfort_schedule": "Comfort schedule (optional)"
+          },
+          "data_description": {
+            "surfaces": "YAML list, e.g. [{kind: window, azimuth: 90, tilt: 90}, {kind: roof, azimuth: 180, tilt: 40}]. Azimuth: 0=N, 90=E, 180=S, 270=W.",
+            "leads_release": "If on, this zone's comfort decides when the boiler may heat.",
+            "valve_entity": "Only for radiators: % opening sensor of the TRV.",
+            "gain_entities": "Power sensors (W), presence or on/off entities that add heat.",
+            "neighbor_sensors": "Temperatures of adjacent rooms (heat exchange is learned).",
+            "comfort_schedule": "A schedule helper (e.g. weekdays 8–17 for the office). When set, it replaces 'Comfort from/until'."
+          }
+        }
+      },
+      "error": {
+        "invalid_surfaces": "Invalid surface list (kind window/roof/wall, azimuth 0–360, tilt 0–90).",
+        "valve_only_radiator": "A valve entity only makes sense for radiators."
+      },
+      "abort": {
+        "reconfigure_successful": "Zone updated."
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Control settings",
+        "data": {
+          "min_block_hours": "Minimum heating block",
+          "min_pause_hours": "Minimum pause",
+          "max_switches_per_day": "Max. release switches per day",
+          "forgetting_factor": "Forgetting factor (per hour)",
+          "confidence_z": "Safety margin (σ)",
+          "dhw_active_entity": "Hot water charging active (optional)",
+          "burner_starts_entity": "Burner starts counter (optional)",
+          "heat_energy_entity": "Heating energy in kWh (optional)",
+          "calibrate_sigma": "Calibrate the uncertainty"
+        },
+        "data_description": {
+          "forgetting_factor": "0.996 ≈ 10 days memory. Lower adapts faster but is noisier.",
+          "confidence_z": "Planner uses mean − z·σ of the forecast. Higher = more cautious.",
+          "dhw_active_entity": "Shades hot water charges in the panel timeline (they raise the flow temperature).",
+          "burner_starts_entity": "Total counter (state class total_increasing), e.g. EMS-ESP burner starts. Used for KPIs.",
+          "heat_energy_entity": "Total heating energy (kWh, total_increasing), e.g. EMS-ESP energy heating. Used for kWh per heating degree day.",
+          "calibrate_sigma": "Widens σ per forecast horizon so that ±σ covers ~68 % of the forecast errors observed in the last 14 days (needs ≥ 48 checks per horizon; never narrows it)."
+        }
+      }
+    }
+  },
+  "selector": {
+    "heat_type": {
+      "options": {
+        "fbh": "Underfloor heating (no actuator)",
+        "radiator": "Radiator with thermostat"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "next_block": {
+        "name": "Next heating block"
+      },
+      "forecast_min": {
+        "name": "Forecast minimum"
+      },
+      "model_error": {
+        "name": "Model error"
+      }
+    },
+    "binary_sensor": {
+      "heating_release": {
+        "name": "Heating release"
+      },
+      "heat_demand": {
+        "name": "Heat demand"
+      }
+    },
+    "switch": {
+      "control_enabled": {
+        "name": "Control enabled"
+      }
+    },
+    "button": {
+      "warmstart": {
+        "name": "Re-learn models from history"
+      }
+    }
+  },
+  "issues": {
+    "release_not_confirmed": {
+      "title": "Thermocast: heating release not confirmed",
+      "description": "{entity} did not take the value Thermocast wrote. Thermocast retries with increasing pauses (at most 40 writes per day) to protect the controller's EEPROM. Check the EMS-ESP gateway and the entity."
+    },
+    "release_write_budget": {
+      "title": "Thermocast: daily write limit reached",
+      "description": "Thermocast stopped writing to {entity} for today (40 writes) to protect the controller's EEPROM. The heating keeps its last state; check why the value does not stick."
+    },
+    "failsafe": {
+      "title": "Thermocast: fail-safe active",
+      "description": "Thermocast keeps heating allowed because: {reason}. It recovers automatically once the cause is gone."
+    }
+  }
+}

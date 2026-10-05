@@ -1,0 +1,185 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Haus & Wärmequelle",
+        "description": "Thermocast startet im Beobachtungsmodus: Es sagt nur vorher, bis du die Steuerung aktivierst.",
+        "data": {
+          "name": "Name",
+          "outdoor_sensor": "Außentemperatur",
+          "flow_temp_sensor": "Vorlauftemperatur",
+          "heating_active_entity": "Heizungspumpe läuft / Heizung aktiv",
+          "release_entity": "Entität für die Heizfreigabe"
+        },
+        "data_description": {
+          "release_entity": "Entität, die Raumheizung erlaubt/sperrt, z. B. Sommer/Winter-Auswahl des RC310 in EMS-ESP.",
+          "heating_active_entity": "Heizungspumpe läuft (z. B. EMS-ESP Heizungspumpe) – besser als der Brennerstatus, weil der Estrich auch in Brennerpausen Wärme bekommt. Empfohlen."
+        }
+      },
+      "release_values": {
+        "title": "Werte für die Freigabe",
+        "data": {
+          "release_on_value": "Wert = Heizen erlaubt",
+          "release_off_value": "Wert = Heizen gesperrt"
+        }
+      }
+    },
+    "error": {
+      "same_release_values": "Die beiden Werte müssen sich unterscheiden.",
+      "not_a_number": "Beide Werte müssen Zahlen sein."
+    },
+    "abort": {
+      "single_instance_allowed": "Es wird nur ein Thermocast-Haus unterstützt."
+    }
+  },
+  "config_subentries": {
+    "zone": {
+      "entry_type": "Zone",
+      "initiate_flow": {
+        "user": "Zone hinzufügen"
+      },
+      "step": {
+        "user": {
+          "title": "Zone",
+          "data": {
+            "name": "Name",
+            "heat_type": "Heizungsart",
+            "temp_sensors": "Temperatursensoren",
+            "valve_entity": "Ventilöffnung (Heizkörper)",
+            "comfort_temp": "Komforttemperatur",
+            "comfort_band": "Erlaubte Unterschreitung",
+            "active_from": "Komfort ab",
+            "active_to": "Komfort bis",
+            "leads_release": "Führt die Freigabe der Wärmequelle",
+            "surfaces": "Sonnenbeschienene Flächen",
+            "neighbor_sensors": "Temperatursensoren Nachbarräume",
+            "gain_entities": "Innere Wärmequellen",
+            "window_entities": "Fenster-/Türkontakte",
+            "comfort_schedule": "Komfort-Zeitplan (optional)"
+          },
+          "data_description": {
+            "surfaces": "YAML-Liste, z. B. [{kind: window, azimuth: 90, tilt: 90}, {kind: roof, azimuth: 180, tilt: 40}]. Azimut: 0=N, 90=O, 180=S, 270=W.",
+            "leads_release": "Wenn an, entscheidet der Komfort dieser Zone, wann der Kessel heizen darf.",
+            "valve_entity": "Nur für Heizkörper: Sensor der Ventilöffnung in % des TRV.",
+            "gain_entities": "Leistungssensoren (W), Anwesenheit oder Ein/Aus-Entitäten, die Wärme liefern.",
+            "neighbor_sensors": "Temperaturen angrenzender Räume (der Wärmeaustausch wird gelernt).",
+            "comfort_schedule": "Ein Zeitplan-Helfer (z. B. werktags 8–17 Uhr fürs Büro). Wenn gesetzt, ersetzt er „Komfort von/bis“."
+          }
+        },
+        "reconfigure": {
+          "title": "Zone",
+          "data": {
+            "name": "Name",
+            "heat_type": "Heizungsart",
+            "temp_sensors": "Temperatursensoren",
+            "valve_entity": "Ventilöffnung (Heizkörper)",
+            "comfort_temp": "Komforttemperatur",
+            "comfort_band": "Erlaubte Unterschreitung",
+            "active_from": "Komfort ab",
+            "active_to": "Komfort bis",
+            "leads_release": "Führt die Freigabe der Wärmequelle",
+            "surfaces": "Sonnenbeschienene Flächen",
+            "neighbor_sensors": "Temperatursensoren Nachbarräume",
+            "gain_entities": "Innere Wärmequellen",
+            "window_entities": "Fenster-/Türkontakte",
+            "comfort_schedule": "Komfort-Zeitplan (optional)"
+          },
+          "data_description": {
+            "surfaces": "YAML-Liste, z. B. [{kind: window, azimuth: 90, tilt: 90}, {kind: roof, azimuth: 180, tilt: 40}]. Azimut: 0=N, 90=O, 180=S, 270=W.",
+            "leads_release": "Wenn an, entscheidet der Komfort dieser Zone, wann der Kessel heizen darf.",
+            "valve_entity": "Nur für Heizkörper: Sensor der Ventilöffnung in % des TRV.",
+            "gain_entities": "Leistungssensoren (W), Anwesenheit oder Ein/Aus-Entitäten, die Wärme liefern.",
+            "neighbor_sensors": "Temperaturen angrenzender Räume (der Wärmeaustausch wird gelernt).",
+            "comfort_schedule": "Ein Zeitplan-Helfer (z. B. werktags 8–17 Uhr fürs Büro). Wenn gesetzt, ersetzt er „Komfort von/bis“."
+          }
+        }
+      },
+      "error": {
+        "invalid_surfaces": "Ungültige Flächenliste (kind window/roof/wall, azimuth 0–360, tilt 0–90).",
+        "valve_only_radiator": "Eine Ventil-Entität ist nur bei Heizkörpern sinnvoll."
+      },
+      "abort": {
+        "reconfigure_successful": "Zone aktualisiert."
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Regelungseinstellungen",
+        "data": {
+          "min_block_hours": "Mindestdauer Heizblock",
+          "min_pause_hours": "Mindestpause",
+          "max_switches_per_day": "Max. Umschaltungen pro Tag",
+          "forgetting_factor": "Vergessensfaktor (pro Stunde)",
+          "confidence_z": "Sicherheitsabstand (σ)",
+          "dhw_active_entity": "Warmwasserladung aktiv (optional)",
+          "burner_starts_entity": "Zähler Brennerstarts (optional)",
+          "heat_energy_entity": "Heizenergie in kWh (optional)",
+          "calibrate_sigma": "Unsicherheit kalibrieren"
+        },
+        "data_description": {
+          "forgetting_factor": "0,996 ≈ 10 Tage Gedächtnis. Kleiner = passt sich schneller an, aber unruhiger.",
+          "confidence_z": "Der Planer rechnet mit Mittelwert − z·σ der Prognose. Höher = vorsichtiger.",
+          "dhw_active_entity": "Schraffiert Warmwasserladungen in der Panel-Zeitachse (sie heben den Vorlauf an).",
+          "burner_starts_entity": "Gesamtzähler (State-Class total_increasing), z. B. EMS-ESP Brennerstarts. Für die KPIs.",
+          "heat_energy_entity": "Gesamte Heizenergie (kWh, total_increasing), z. B. EMS-ESP Energie Heizung. Für kWh pro Heizgradtag.",
+          "calibrate_sigma": "Weitet σ je Prognosehorizont so, dass ±σ etwa 68 % der in den letzten 14 Tagen beobachteten Prognosefehler abdeckt (braucht ≥ 48 Prüfungen je Horizont; verengt nie)."
+        }
+      }
+    }
+  },
+  "selector": {
+    "heat_type": {
+      "options": {
+        "fbh": "Fußbodenheizung (ohne Stellantrieb)",
+        "radiator": "Heizkörper mit Thermostat"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "next_block": {
+        "name": "Nächster Heizblock"
+      },
+      "forecast_min": {
+        "name": "Prognose-Minimum"
+      },
+      "model_error": {
+        "name": "Modellfehler"
+      }
+    },
+    "binary_sensor": {
+      "heating_release": {
+        "name": "Heizfreigabe"
+      },
+      "heat_demand": {
+        "name": "Heizbedarf"
+      }
+    },
+    "switch": {
+      "control_enabled": {
+        "name": "Steuerung aktiv"
+      }
+    },
+    "button": {
+      "warmstart": {
+        "name": "Modelle aus Historie neu lernen"
+      }
+    }
+  },
+  "issues": {
+    "release_not_confirmed": {
+      "title": "Thermocast: Heizfreigabe nicht bestätigt",
+      "description": "{entity} hat den von Thermocast geschriebenen Wert nicht übernommen. Thermocast versucht es mit wachsenden Pausen erneut (höchstens 40 Schreibvorgänge pro Tag), um das EEPROM des Reglers zu schonen. Bitte EMS-ESP-Gateway und Entität prüfen."
+    },
+    "release_write_budget": {
+      "title": "Thermocast: Tageslimit für Schreibvorgänge erreicht",
+      "description": "Thermocast schreibt heute nicht mehr nach {entity} (40 Schreibvorgänge), um das EEPROM des Reglers zu schonen. Die Heizung behält ihren letzten Zustand; bitte prüfen, warum der Wert nicht übernommen wird."
+    },
+    "failsafe": {
+      "title": "Thermocast: Fail-safe aktiv",
+      "description": "Thermocast lässt das Heizen erlaubt, weil: {reason}. Sobald die Ursache behoben ist, läuft alles automatisch weiter."
+    }
+  }
+}
