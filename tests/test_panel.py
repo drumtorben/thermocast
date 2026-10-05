@@ -87,3 +87,16 @@ async def test_subscribe_without_entry(hass: HomeAssistant, mock_entry, mock_ope
     await ws.send_json_auto_id({"type": "thermocast/subscribe"})
     msg = await ws.receive_json()
     assert msg["success"] is False and msg["error"]["code"] == "not_loaded"
+
+
+async def test_brand_icon_is_served(hass: HomeAssistant, mock_entry, mock_open_meteo, hass_client) -> None:
+    from homeassistant.setup import async_setup_component
+
+    await _setup_states(hass)
+    await _setup_entry(hass, mock_entry)
+    assert await async_setup_component(hass, "brands", {})
+    client = await hass_client()
+    for image in ("icon.png", "icon@2x.png", "dark_logo.png"):
+        resp = await client.get(f"/api/brands/integration/thermocast/{image}")
+        assert resp.status == 200, image
+        assert (await resp.read())[:8] == b"\x89PNG\r\n\x1a\n"

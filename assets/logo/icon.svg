@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="16 16 224 224">
+  <!-- Thermocast: roof (the house), sun arc (forecast input), heating blocks (the plan) -->
+  <rect x="16" y="16" width="224" height="224" rx="52" fill="#0B4F7A"/>
+  <path d="M60 132 L128 76 L196 132" fill="none" stroke="#FFFFFF" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M150 64 a34 34 0 0 1 58 24" fill="none" stroke="#F5B700" stroke-width="12" stroke-linecap="round"/>
+  <rect x="70" y="160" width="28" height="44" rx="6" fill="#FF8A3D"/>
+  <rect x="114" y="176" width="28" height="28" rx="6" fill="#FFC08A"/>
+  <rect x="158" y="150" width="28" height="54" rx="6" fill="#FF8A3D"/>
+</svg>

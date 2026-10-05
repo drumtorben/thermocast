@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="custom_components/thermocast/brand/dark_logo@2x.png">
+    <img alt="Thermocast" src="custom_components/thermocast/brand/logo@2x.png" width="420">
+  </picture>
+</p>
+
 # Thermocast
 
 Vorausschauende Heizfreigabe für Home Assistant – mit **online lernenden Raummodellen**,
