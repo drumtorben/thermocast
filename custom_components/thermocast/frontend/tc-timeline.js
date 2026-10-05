@@ -275,13 +275,10 @@ class TcTimeline extends LitElement {
       const e = this._indexOfTime(c.end);
       cand = svg`<rect x=${this._x(s)} y="4" width=${(e - s) * this._pph} height="18" rx="2" fill=${C.cand} opacity="0.45"></rect>`;
     }
+    // details live in the hover tooltip (an SVG <title> never shows under the hover layer or on touch)
     const events = v.events.map((ev) => {
       const x = this._x(this._indexOfTime(ev.time));
-      const zone = ev.zone ? v.zones.find((z) => z.id === ev.zone)?.name ?? ev.zone : "";
-      const label = `${fmtDay(ev.time, this.lang, this.tz)} ${fmtTime(ev.time, this.lang, this.tz)} · ${t(this.lang, "ev_" + ev.type)}${
-        zone ? " · " + zone : ""
-      }${ev.detail ? " · " + ev.detail : ""}`;
-      return svg`<g class="event"><path d="M${x},${h - 2} l-5,-9 h10 z" fill=${C.event}></path><title>${label}</title></g>`;
+      return svg`<g class="event"><path d="M${x},${h - 2} l-5,-9 h10 z" fill=${C.event}></path></g>`;
     });
     return this._frame(h, svg`${defs}${bars}${dhw}${planned}${cand}${events}`, t(this.lang, "heating"));
   }
@@ -436,11 +433,27 @@ class TcTimeline extends LitElement {
           : nothing}
       </div>`;
     });
+    const heat = i < now && isNum(v.heating.actual[i]) ? v.heating.actual[i] : null;
+    const dhw = i < now && isNum((v.heating.dhw || [])[i]) ? v.heating.dhw[i] : null;
+    const heatLine = heat || dhw
+      ? html`<div>${t(L, "heating")} ${Math.round((heat || 0) * 60)} min${
+          dhw ? html` · ${t(L, "dhw")} ${Math.round(dhw * 60)} min` : nothing
+        }</div>`
+      : nothing;
+    const events = v.events
+      .filter((ev) => Math.floor(this._indexOfTime(ev.time)) === i)
+      .map((ev) => {
+        const zone = ev.zone ? v.zones.find((z) => z.id === ev.zone)?.name ?? ev.zone : "";
+        return html`<div class="ev">▼ ${fmtTime(ev.time, L, this.tz)} ${t(L, "ev_" + ev.type)}${
+          zone ? " · " + zone : ""
+        }${ev.detail ? " · " + ev.detail : ""}</div>`;
+      });
     const x = this._x(i + 0.5);
     const left = x + 12 + TIP_W > this._w ? x - 12 - TIP_W : x + 12;
     return html`<div class="tip" style="left:${Math.max(4, left)}px">
       <div class="tt">${fmtDay(v.hours[i], L, this.tz)} ${fmtTime(v.hours[i], L, this.tz)}</div>
       <div>${t(L, "t_out")} ${fmtNum(v.weather.t_out[i], L)} °C${irr.length ? " · " + irr.join(" · ") : ""}</div>
+      ${heatLine} ${events}
       ${zones}
     </div>`;
   }
@@ -516,8 +529,8 @@ class TcTimeline extends LitElement {
       font-weight: 600;
       fill: var(--primary-text-color, #212121);
     }
-    .event {
-      cursor: help;
+    .ev {
+      color: var(--secondary-text-color, #727272);
     }
     .zone-head {
       display: flex;
