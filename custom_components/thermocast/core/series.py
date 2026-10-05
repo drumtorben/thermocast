@@ -43,6 +43,31 @@ def _hourly(
     return out
 
 
+def mask_off(series: StateSeries, mask: StateSeries, is_on: Callable[[str], float | None]) -> StateSeries:
+    """``series`` with every period in which ``mask`` is on forced to "off".
+
+    E.g. boiler pump minus DHW charging: on a combi boiler the same pump runs for hot water.
+    """
+    points = sorted({t for t, _ in series} | {t for t, _ in mask})
+    out: StateSeries = []
+    i = j = 0
+    cur: str | None = None
+    masked = False
+    for t in points:
+        while i < len(series) and series[i][0] <= t:
+            cur = series[i][1]
+            i += 1
+        while j < len(mask) and mask[j][0] <= t:
+            masked = is_on(mask[j][1]) == 1.0
+            j += 1
+        if cur is None:
+            continue
+        state = "off" if masked and is_on(cur) is not None else cur
+        if not out or out[-1][1] != state:
+            out.append((t, state))
+    return out
+
+
 def hourly_mean(series: StateSeries, hours: list[datetime], end: datetime) -> list[float | None]:
     """Time-weighted mean of numeric states per hour, up to ``end`` (later hours: None)."""
     return _hourly(series, hours, end, _float)

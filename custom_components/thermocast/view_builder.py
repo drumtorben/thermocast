@@ -34,7 +34,7 @@ from .core.model import Prediction
 from .core.quality import hindcast
 from .core.rollout import ActuatorState, block_lengths_for
 from .core.rules import apply_rules, binary_value, release_state
-from .core.series import hourly_fraction, hourly_mean
+from .core.series import hourly_fraction, hourly_mean, mask_off
 from .core.view import ZoneViewInput, align, build_view, compute_outlook, make_window
 from .history import async_fetch_states
 
@@ -185,7 +185,11 @@ class ViewBuilder:
 
         release = [None if f is None else f >= 0.5 for f in fraction_of(rel, rel_value)]
         planner = [None if f is None else f >= 0.5 for f in fraction_of(planner_eid, binary_value)]
-        heating_actual = fraction_of(pump, binary_value)
+        # the boiler pump also runs for hot water: that time is not space heating
+        pump_states = states.get(pump, []) if pump else []
+        if dhw_eid and pump_states:
+            pump_states = mask_off(pump_states, states.get(dhw_eid, []), binary_value)
+        heating_actual = hourly_fraction(pump_states, hours, now, binary_value) if pump else [None] * n
         t_meas = mean_of(outdoor)
 
         # ------------------------------------------------------------ forecast

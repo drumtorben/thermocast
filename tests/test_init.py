@@ -185,6 +185,34 @@ async def test_hour_close_survives_changed_sensor_layout(
     assert z.log.to_list()[0]["rec"]["neighbors"] == [20.4]  # no sample -> falls back to the zone temperature
 
 
+async def test_dhw_charging_is_not_space_heating(hass: HomeAssistant, mock_entry, mock_open_meteo, freezer) -> None:
+    """Combi boiler: the pump runs with ~70 °C flow for hot water – that must not be learned as room heating."""
+    from custom_components.thermocast.const import CONF_DHW_ENTITY
+
+    freezer.move_to("2026-10-04 10:05:00+00:00")
+    mock_open_meteo(5.0)
+    await _setup_states(hass)
+    hass.states.async_set("binary_sensor.heating_pump", "on")
+    hass.states.async_set("binary_sensor.dhw_charging", "on")
+    hass.states.async_set("sensor.flow", "70.0", {"device_class": "temperature"})
+    mock_entry.add_to_hass(hass)
+    hass.config_entries.async_update_entry(mock_entry, options={CONF_DHW_ENTITY: "binary_sensor.dhw_charging"})
+    assert await hass.config_entries.async_setup(mock_entry.entry_id)
+    await hass.async_block_till_done()
+
+    hass.states.async_set("binary_sensor.dhw_charging", "off")  # hour 11: space heating, the flow counts
+    freezer.move_to("2026-10-04 11:05:00+00:00")
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    z = mock_entry.runtime_data.zones["zone_eg"]
+    assert z.log.to_list()[0]["rec"]["q"] == 0.0  # hour 10 was sampled during the charge
+
+    freezer.move_to("2026-10-04 12:05:00+00:00")
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert z.log.to_list()[-1]["rec"]["q"] > 40
+
+
 async def test_hour_close_learns_and_persists(
     hass: HomeAssistant, mock_entry, mock_open_meteo, freezer, hass_storage
 ) -> None:

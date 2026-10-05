@@ -13,7 +13,7 @@ const STR = {
     block_until: "block runs until {end}",
     no_block: "no block planned",
     exp_block_planned:
-      "{zone} drops below {temp} °C without heating {when}. The screed needs lead time, so the block starts {lead} h earlier.",
+      "{zone} drops below {temp} °C without heating {when}. Heating up takes time, so the block starts {lead} h earlier.",
     exp_heating_now: "{zone} would drop below {temp} °C {when} – the block runs until {end}.",
     exp_heating_now_short: "A heating block runs until {end}.",
     exp_no_need: "No zone drops below its comfort band within the next 24 h.",
@@ -174,7 +174,7 @@ const STR = {
     block_until: "Block läuft bis {end}",
     no_block: "kein Block geplant",
     exp_block_planned:
-      "{zone} fällt ohne Heizen {when} unter {temp} °C. Der Estrich braucht Vorlauf, deshalb startet der Block {lead} h vorher.",
+      "{zone} fällt ohne Heizen {when} unter {temp} °C. Aufheizen braucht Zeit, deshalb startet der Block {lead} h vorher.",
     exp_heating_now: "{zone} würde {when} unter {temp} °C fallen – der Block läuft bis {end}.",
     exp_heating_now_short: "Ein Heizblock läuft bis {end}.",
     exp_no_need: "Keine Zone fällt in den nächsten 24 h unter ihr Komfortband.",

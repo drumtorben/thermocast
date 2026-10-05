@@ -137,7 +137,7 @@
         "data_description": {
           "forgetting_factor": "0.996 ≈ 10 days memory. Lower adapts faster but is noisier.",
           "confidence_z": "Planner uses mean − z·σ of the forecast. Higher = more cautious.",
-          "dhw_active_entity": "Shades hot water charges in the panel timeline (they raise the flow temperature).",
+          "dhw_active_entity": "Hot water charging runs the boiler pump with a hot flow: these times do not count as space heating (model, history, warm start) and are shaded in the timeline. Recommended for combi boilers.",
           "burner_starts_entity": "Total counter (state class total_increasing), e.g. EMS-ESP burner starts. Used for KPIs.",
           "heat_energy_entity": "Total heating energy (kWh, total_increasing), e.g. EMS-ESP energy heating. Used for kWh per heating degree day.",
           "calibrate_sigma": "Widens σ per forecast horizon so that ±σ covers ~68 % of the forecast errors observed in the last 14 days (needs ≥ 48 checks per horizon; never narrows it)."

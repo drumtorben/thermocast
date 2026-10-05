@@ -137,7 +137,7 @@
         "data_description": {
           "forgetting_factor": "0,996 ≈ 10 Tage Gedächtnis. Kleiner = passt sich schneller an, aber unruhiger.",
           "confidence_z": "Der Planer rechnet mit Mittelwert − z·σ der Prognose. Höher = vorsichtiger.",
-          "dhw_active_entity": "Schraffiert Warmwasserladungen in der Panel-Zeitachse (sie heben den Vorlauf an).",
+          "dhw_active_entity": "Warmwasserladungen laufen über dieselbe Kesselpumpe mit heißem Vorlauf: Diese Zeiten zählen nicht als Heizen (Modell, Verlauf, Warmstart) und werden in der Zeitachse schraffiert. Empfohlen, wenn der Kessel auch den Speicher lädt.",
           "burner_starts_entity": "Gesamtzähler (State-Class total_increasing), z. B. EMS-ESP Brennerstarts. Für die KPIs.",
           "heat_energy_entity": "Gesamte Heizenergie (kWh, total_increasing), z. B. EMS-ESP Energie Heizung. Für kWh pro Heizgradtag.",
           "calibrate_sigma": "Weitet σ je Prognosehorizont so, dass ±σ etwa 68 % der in den letzten 14 Tagen beobachteten Prognosefehler abdeckt (braucht ≥ 48 Prüfungen je Horizont; verengt nie)."

@@ -10,6 +10,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    CONF_DHW_ENTITY,
     CONF_FLOW_TEMP_SENSOR,
     CONF_FORGETTING,
     CONF_GAIN_ENTITIES,
@@ -25,7 +26,7 @@ from .const import (
 from .core.forecast import fetch_forecast
 from .core.model import OnlineZoneModel
 from .core.rules import binary_value
-from .core.series import hourly_fraction, hourly_mean
+from .core.series import hourly_fraction, hourly_mean, mask_off
 from .core.view import align
 from .core.warmstart import WarmstartInputs, build_records, warm_train
 from .history import async_fetch_states, async_fetch_statistics
@@ -57,7 +58,8 @@ async def async_warmstart(coordinator: ThermocastCoordinator, only_fresh: bool) 
     hours = [start + i * HOUR for i in range(WARMSTART_DAYS * 24)]
 
     numeric_ids: set[str] = {e for e in (cfg.get(CONF_OUTDOOR_SENSOR), cfg.get(CONF_FLOW_TEMP_SENSOR)) if e}
-    binary_ids: set[str] = {e for e in (cfg.get(CONF_HEATING_ACTIVE),) if e}
+    dhw_eid = coordinator.config_entry.options.get(CONF_DHW_ENTITY)
+    binary_ids: set[str] = {e for e in (cfg.get(CONF_HEATING_ACTIVE), dhw_eid) if e}
     for z in targets.values():
         numeric_ids |= set(z.cfg.get(CONF_TEMP_SENSORS, [])) | set(z.cfg.get(CONF_NEIGHBOR_SENSORS, []))
         numeric_ids |= set(z.cfg.get(CONF_GAIN_ENTITIES, []))
@@ -93,7 +95,12 @@ async def async_warmstart(coordinator: ThermocastCoordinator, only_fresh: bool) 
         t_fc = align(fc.times, fc.t_out, hours)
         t_out = [m if m is not None else f for m, f in zip(t_out, t_fc)]
     flow = numeric(cfg.get(CONF_FLOW_TEMP_SENSOR))
-    heating = binary(cfg[CONF_HEATING_ACTIVE]) if cfg.get(CONF_HEATING_ACTIVE) else None
+    heating = None
+    if cfg.get(CONF_HEATING_ACTIVE):
+        pump = states.get(cfg[CONF_HEATING_ACTIVE], [])
+        if dhw_eid:  # hot water charging runs the same pump with a hot flow – not space heating
+            pump = mask_off(pump, states.get(dhw_eid, []), binary_value)
+        heating = hourly_fraction(pump, hours, end, binary_value)
     forgetting = float(coordinator.config_entry.options.get(CONF_FORGETTING, DEFAULT_FORGETTING))
 
     result: dict[str, int] = {}

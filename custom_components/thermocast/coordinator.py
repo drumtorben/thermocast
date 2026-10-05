@@ -27,6 +27,7 @@ from .const import (
     CONF_COMFORT_SCHEDULE,
     CONF_COMFORT_TEMP,
     CONF_CONFIDENCE_Z,
+    CONF_DHW_ENTITY,
     CONF_FLOW_TEMP_SENSOR,
     CONF_FORGETTING,
     CONF_GAIN_ENTITIES,
@@ -449,6 +450,8 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
             # no 'heating active' entity configured: rely on flow temperature only
             # (less accurate – DHW charging also raises the boiler flow temperature)
             heating = True
+        if _is_on(hass, self.config_entry.options.get(CONF_DHW_ENTITY)):
+            heating = False  # combi boiler: hot water charging runs the same pump with a hot flow
 
         hour_closed = False
         for z in self.zones.values():

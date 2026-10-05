@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 from . import core_helpers  # noqa: F401
 from core.rules import binary_value
-from core.series import hourly_fraction, hourly_mean
+from core.series import hourly_fraction, hourly_mean, mask_off
 
 T0 = datetime(2026, 10, 3, 22, tzinfo=UTC)
 HOURS = [T0 + timedelta(hours=i) for i in range(4)]
@@ -31,3 +31,16 @@ def test_empty_series():
 def test_on_fraction():
     series = [(T0, "off"), (T0 + timedelta(minutes=15), "on"), (T0 + timedelta(minutes=45), "off")]
     assert hourly_fraction(series, HOURS[:2], T0 + timedelta(hours=2), binary_value) == [0.5, 0.0]
+
+
+def test_pump_minus_dhw_charging():
+    """The combi boiler's pump also runs for hot water – that time is not space heating."""
+    m = lambda k: T0 + timedelta(minutes=k)
+    pump = [(m(-10), "on"), (m(70), "off"), (m(100), "unavailable")]
+    dhw = [(m(-30), "off"), (m(20), "on"), (m(35), "off"), (m(80), "on"), (m(90), "off")]
+    heating = mask_off(pump, dhw, binary_value)
+    assert heating == [(m(-10), "on"), (m(20), "off"), (m(35), "on"), (m(70), "off"), (m(100), "unavailable")]
+    end = T0 + timedelta(hours=2)
+    assert hourly_fraction(heating, HOURS[:2], end, binary_value) == [0.75, round(10 / 40, 3)]
+    assert mask_off(pump, [], binary_value) == pump
+    assert mask_off([], dhw, binary_value) == []
