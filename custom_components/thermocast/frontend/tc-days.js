@@ -68,4 +68,5 @@ class TcDays extends LitElement {
   `;
 }
 
-customElements.define("tc-days", TcDays);
+// the panel module can load twice (new ?v= after an update without page reload)
+if (!customElements.get("tc-days")) customElements.define("tc-days", TcDays);

@@ -589,4 +589,5 @@ class TcTimeline extends LitElement {
   `;
 }
 
-customElements.define("tc-timeline", TcTimeline);
+// the panel module can load twice (new ?v= after an update without page reload)
+if (!customElements.get("tc-timeline")) customElements.define("tc-timeline", TcTimeline);

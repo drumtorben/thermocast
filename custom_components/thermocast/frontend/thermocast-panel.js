@@ -245,4 +245,5 @@ class ThermocastPanel extends LitElement {
   `;
 }
 
-customElements.define("thermocast-panel", ThermocastPanel);
+// the panel module can load twice (new ?v= after an update without page reload)
+if (!customElements.get("thermocast-panel")) customElements.define("thermocast-panel", ThermocastPanel);

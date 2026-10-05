@@ -221,4 +221,5 @@ class TcKpis extends LitElement {
   `;
 }
 
-customElements.define("tc-kpis", TcKpis);
+// the panel module can load twice (new ?v= after an update without page reload)
+if (!customElements.get("tc-kpis")) customElements.define("tc-kpis", TcKpis);

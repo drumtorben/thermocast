@@ -157,6 +157,34 @@ async def test_missing_leading_sensor_failsafe(hass: HomeAssistant, mock_entry, 
     assert release.attributes["failsafe_reason"] == "no_temperature:EG"
 
 
+async def test_hour_close_survives_changed_sensor_layout(
+    hass: HomeAssistant, mock_entry, mock_open_meteo, freezer
+) -> None:
+    """Regression: the running hour was collected before neighbours were added -> IndexError every 15 min."""
+    from custom_components.thermocast.const import CONF_NEIGHBOR_SENSORS
+
+    freezer.move_to("2026-10-04 10:05:00+00:00")
+    mock_open_meteo(5.0)
+    await _setup_states(hass)
+    hass.states.async_set("sensor.hall", "19.0", {"device_class": "temperature"})
+    mock_entry.add_to_hass(hass)
+    hass.config_entries.async_update_subentry(
+        mock_entry, mock_entry.subentries["zone_eg"],
+        data={**mock_entry.subentries["zone_eg"].data, CONF_NEIGHBOR_SENSORS: ["sensor.hall"]},
+    )
+    assert await hass.config_entries.async_setup(mock_entry.entry_id)
+    await hass.async_block_till_done()
+    z = mock_entry.runtime_data.zones["zone_eg"]
+    z.acc["neighbors"] = [[]] * len(z.acc["neighbors"])  # samples from the old layout (no neighbour)
+
+    freezer.move_to("2026-10-04 11:05:00+00:00")
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert mock_entry.runtime_data.last_update_success
+    assert z.model.n_updates == 1 and len(z.log) == 1
+    assert z.log.to_list()[0]["rec"]["neighbors"] == [20.4]  # no sample -> falls back to the zone temperature
+
+
 async def test_hour_close_learns_and_persists(
     hass: HomeAssistant, mock_entry, mock_open_meteo, freezer, hass_storage
 ) -> None:

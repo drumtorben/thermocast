@@ -293,4 +293,5 @@ class TcModel extends LitElement {
   `;
 }
 
-customElements.define("tc-model", TcModel);
+// the panel module can load twice (new ?v= after an update without page reload)
+if (!customElements.get("tc-model")) customElements.define("tc-model", TcModel);

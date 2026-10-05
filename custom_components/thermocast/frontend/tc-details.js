@@ -151,4 +151,5 @@ class TcDetails extends LitElement {
   `;
 }
 
-customElements.define("tc-details", TcDetails);
+// the panel module can load twice (new ?v= after an update without page reload)
+if (!customElements.get("tc-details")) customElements.define("tc-details", TcDetails);

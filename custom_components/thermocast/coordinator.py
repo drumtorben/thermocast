@@ -99,6 +99,11 @@ def _mean(values: list[float]) -> float | None:
     return fmean(vals) if vals else None
 
 
+def _column(rows: list[list[float | None]], i: int) -> list[float | None]:
+    """Column ``i`` of the per-sample rows; rows from another sensor layout simply lack it."""
+    return [row[i] if i < len(row) else None for row in rows]
+
+
 def _parse_time(value: str) -> time:
     return time.fromisoformat(value)
 
@@ -263,12 +268,14 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
             zr = self._build_zone(subentry, forgetting)
             saved = models.get(subentry.subentry_id)
             if saved:
-                if not zr.model.load_dict(saved.get("model", {})):
+                same_layout = zr.model.load_dict(saved.get("model", {}))
+                if not same_layout:
                     _LOGGER.info("Zone %s: configuration changed, model restarts from prior", subentry.title)
                     self.events.add(dt_util.utcnow(), "model_reset", zone=subentry.subentry_id)
                 zr.q_on = float(saved.get("q_on", DEFAULT_Q_ON))
                 pending = saved.get("pending") or {}
-                if pending.get("hour"):
+                # the running hour was collected with the old sensor layout -> only keep it if nothing changed
+                if pending.get("hour") and same_layout:
                     # the running hour survives a restart; _update decides whether it can still be learned
                     zr.pending_hour = datetime.fromisoformat(pending["hour"])
                     zr.pending_temp = pending.get("temp")
@@ -450,7 +457,10 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
                 continue
             # 1) close the previous hour -> one RLS step
             if z.pending_hour is not None and hour > z.pending_hour:
-                self._close_hour(z, temp, consecutive=(hour - z.pending_hour) == timedelta(hours=1))
+                try:
+                    self._close_hour(z, temp, consecutive=(hour - z.pending_hour) == timedelta(hours=1))
+                except Exception:  # lose this hour, never get stuck on it (it would fail again every 15 min)
+                    _LOGGER.exception("Thermocast: closing the hour failed for zone %s, skipping it", z.title)
                 hour_closed = True
             if z.pending_hour is None or hour > z.pending_hour:
                 z.pending_hour, z.pending_temp = hour, temp
@@ -502,10 +512,8 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
         acc = z.acc
         n_nb = len(z.cfg.get(CONF_NEIGHBOR_SENSORS, []))
         n_g = len(z.cfg.get(CONF_GAIN_ENTITIES, []))
-        neighbors = tuple(
-            _or(_mean([row[i] for row in acc["neighbors"]]), z.pending_temp) for i in range(n_nb)
-        )
-        gains = tuple(_or(_mean([row[i] for row in acc["gains"]]), 0.0) for i in range(n_g))
+        neighbors = tuple(_or(_mean(_column(acc["neighbors"], i)), z.pending_temp) for i in range(n_nb))
+        gains = tuple(_or(_mean(_column(acc["gains"], i)), 0.0) for i in range(n_g))
         irr: dict[str, float] = {}
         if self.forecast and z.pending_hour is not None:
             idx = self.forecast.index_of(z.pending_hour)
