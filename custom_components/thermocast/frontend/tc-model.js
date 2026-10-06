@@ -89,7 +89,7 @@ class TcModel extends LitElement {
     const sun = z.sun_lags || [];
     const sunMax = Math.max(1e-9, ...sun.flatMap((p) => p.lags.map((l) => Math.abs(l.value))));
     return html`<div class="lags">
-      <div class="sub">${t(L, "m_lags")}</div>
+      <div class="sub">${t(L, z.heat_type === "fbh" ? "m_lags_fbh" : "m_lags")}</div>
       ${this._lagBars(z.heat_lags, "#D55E00", heatMax)}
       ${sun.length
         ? html`<div class="sub">${t(L, "m_sun_lags")}</div>
