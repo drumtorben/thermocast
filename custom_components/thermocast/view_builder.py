@@ -107,7 +107,9 @@ class ViewBuilder:
         try:
             self._update_shadow(now, data)
             hour0 = now.replace(minute=0, second=0, microsecond=0)
-            key = (hour0, c.forecast.fetched_at if c.forecast else None, data.failsafe_reason)
+            # zones with a plan belong to the key: right after a start the first view has none yet
+            planned = tuple(sorted(sid for sid, zr in data.zones.items() if zr.times))
+            key = (hour0, c.forecast.fetched_at if c.forecast else None, data.failsafe_reason, planned)
             if self.view is None or "error" in self.view or key != self._key:
                 self.view = await self._async_build(now, hour0, data)
                 self._key = key

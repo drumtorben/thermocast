@@ -135,6 +135,9 @@ async def test_startup_waits_for_sensors_instead_of_releasing(
     await hass.async_block_till_done(wait_background_tasks=True)
     assert mock_entry.runtime_data.data.failsafe_reason is None
     assert hass.states.get("input_number.summer_threshold").state == "10.0"
+    # the panel must not keep the 'no plan yet' view from the first minute
+    assert mock_entry.runtime_data.view["explanation"]["code"] != "no_forecast"
+    assert mock_entry.runtime_data.view["zones"][0]["plan"]["mean"][mock_entry.runtime_data.view["window"]["now_index"]]
 
 
 async def test_sensor_missing_after_startup_grace_releases(
