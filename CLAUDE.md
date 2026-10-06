@@ -133,6 +133,9 @@ für die Wärmepumpe später COP(T_out, Vorlauf), Strompreis, PV-Überschuss.
 - Fail-safe → AN: Update-Exception, Prognose > 2 h alt, fehlender Sensor einer führenden Zone,
   Integration entladen, Steuerung ausgeschaltet.
 - Fail-safe ist ein erzwungenes AN: wirkt auch in der Mindestpause und hinterlässt keine Mindestblock-Pflicht.
+- Anlaufphase: in den ersten 5 min nach dem Start halten fehlende Sensoren/Prognose den gespeicherten Zustand
+  (Prüfung jede Minute, Override `startup`) – MQTT/Zigbee kommen nach einem HA-Neustart oft verzögert.
+- Selbst-Neuladen nach Konfigurationsänderung (Update-Listener) gibt nicht frei; Deaktivieren/Entfernen schon.
 - Empfohlene Freigabe-Entität: **RC310-Sommer/Winter-Modus (`select`)**, Winter = erlaubt, Auto = gesperrt,
   Sommerschwelle fest 10 °C → ein Block heizt sicher auch an milden Tagen, Pumpe steht zwischen den Blöcken,
   bei HA-Ausfall heizt das RC310 spätestens unter 10 °C. (Schwelle 16/10 allein wirkt nur bei Modus Auto

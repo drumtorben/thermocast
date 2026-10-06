@@ -110,6 +110,56 @@ async def test_observe_mode_never_writes(hass: HomeAssistant, mock_entry, mock_o
     assert mock_entry.runtime_data.data.override == "observe"
 
 
+async def test_startup_waits_for_sensors_instead_of_releasing(
+    hass: HomeAssistant, mock_entry, mock_open_meteo, freezer, hass_storage
+) -> None:
+    """HA restart: MQTT/Zigbee sensors come back a few minutes late – that is no reason to start the boiler."""
+    from custom_components.thermocast.coordinator import STORAGE_VERSION
+
+    freezer.move_to("2026-10-04 10:05:00+00:00")
+    mock_open_meteo(18.0)
+    hass_storage[f"{DOMAIN}.{mock_entry.entry_id}"] = {
+        "version": STORAGE_VERSION, "key": f"{DOMAIN}.{mock_entry.entry_id}",
+        "data": {"control_enabled": True, "actuator": {"commanded": False}, "zones": {}, "events": []},
+    }
+    await _setup_states(hass, temp=22.0, release=10)
+    hass.states.async_set("sensor.living", "unavailable")
+    hass.states.async_set("sensor.kitchen", "unavailable")
+    await _setup_entry(hass, mock_entry)
+    assert hass.states.get("input_number.summer_threshold").state == "10.0"  # held, not released
+    assert mock_entry.runtime_data.data.override == "startup"
+
+    hass.states.async_set("sensor.living", "22.0", {"device_class": "temperature"})  # back after 2 min
+    freezer.tick(timedelta(minutes=2))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert mock_entry.runtime_data.data.failsafe_reason is None
+    assert hass.states.get("input_number.summer_threshold").state == "10.0"
+
+
+async def test_sensor_missing_after_startup_grace_releases(
+    hass: HomeAssistant, mock_entry, mock_open_meteo, freezer, hass_storage
+) -> None:
+    from custom_components.thermocast.coordinator import STORAGE_VERSION
+
+    freezer.move_to("2026-10-04 10:05:00+00:00")
+    mock_open_meteo(18.0)
+    hass_storage[f"{DOMAIN}.{mock_entry.entry_id}"] = {
+        "version": STORAGE_VERSION, "key": f"{DOMAIN}.{mock_entry.entry_id}",
+        "data": {"control_enabled": True, "actuator": {"commanded": False}, "zones": {}, "events": []},
+    }
+    await _setup_states(hass, temp=22.0, release=10)
+    hass.states.async_set("sensor.living", "unavailable")
+    hass.states.async_set("sensor.kitchen", "unavailable")
+    await _setup_entry(hass, mock_entry)
+    for _ in range(12):  # still missing after the grace period
+        freezer.tick(timedelta(minutes=1))
+        async_fire_time_changed(hass)
+        await hass.async_block_till_done(wait_background_tasks=True)
+    assert mock_entry.runtime_data.data.failsafe_reason == "no_temperature:EG"
+    assert hass.states.get("input_number.summer_threshold").state == "16.0"
+
+
 async def test_reload_does_not_flip_the_release(hass: HomeAssistant, mock_entry, mock_open_meteo, freezer) -> None:
     """Every config change reloads the entry – that must not switch the boiler on and off again."""
     mock_open_meteo(18.0)

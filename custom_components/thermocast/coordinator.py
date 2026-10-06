@@ -79,6 +79,9 @@ PARAM_HISTORY_DAYS = 30
 SAVE_DELAY_S = 60
 ISSUE_FAILSAFE = "failsafe"
 FAILSAFE_ISSUE_AFTER = timedelta(hours=1)
+STARTUP_GRACE = timedelta(minutes=5)  # after a start: missing sensors/forecast hold the state for this long
+STARTUP_RECHECK = timedelta(minutes=1)  # … and are checked again every minute
+STARTUP_HOLD_REASONS = ("no_temperature", "no_forecast", "forecast_gap", "no_zones")
 RELOADING = "reloading"  # set by the update listener: the next unload is a self-reload, not a removal
 
 
@@ -312,6 +315,7 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
         self._failsafe_active = False
         self.view_builder = ViewBuilder(self)
         self.control_since: datetime | None = None
+        self._started = dt_util.utcnow()  # startup grace: sensors may come back a little later
         self._warmstart_running = False
         self._failsafe_since: datetime | None = None
         self._failsafe_issue = False
@@ -499,6 +503,16 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
         ir.async_delete_issue(self.hass, DOMAIN, ISSUE_FAILSAFE)  # a removed integration has nothing to repair
         self.async_update_listeners()  # open panels re-subscribe
 
+    def _startup_hold(self, now: datetime, failsafe: str | None) -> bool:
+        """Right after a start, missing sensors or forecast are expected (MQTT/Zigbee reconnecting) –
+        hold the stored release instead of starting the boiler. Only with a known stored state."""
+        return (
+            failsafe is not None
+            and failsafe.split(":", 1)[0] in STARTUP_HOLD_REASONS
+            and now - self._started < STARTUP_GRACE
+            and self.actuator.commanded is not None
+        )
+
     async def _release_everything(self) -> None:
         await self.actuator.async_force_on()
         try:
@@ -576,6 +590,12 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
 
         result = await self._forecast_and_plan(now)
         failsafe = result.pop("failsafe")
+        holding = self._startup_hold(now, failsafe)
+        if holding:
+            # sensors/forecast not back yet after a start: keep the stored state, look again in a minute
+            failsafe = None
+            result["want_heat"] = bool(self.actuator.commanded)
+        self.update_interval = STARTUP_RECHECK if holding else UPDATE_INTERVAL
         if failsafe and not self._failsafe_active:
             self.events.add(now, "failsafe_start", detail=failsafe)
             self._failsafe_since = now
@@ -587,6 +607,8 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
         release, override = await self.actuator.async_apply(want_heat, self.control_enabled, now, forced=bool(failsafe))
         if failsafe:
             override = "failsafe"
+        elif holding:
+            override = "startup"
         bt = await self.zone_actuator.async_apply(
             self.zones, self.zone_temps(), block_on=release, failsafe=bool(failsafe), enabled=self.control_enabled,
             now=now, block_end=result["block_end"],

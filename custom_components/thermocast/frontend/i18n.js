@@ -25,6 +25,7 @@ const STR = {
     override_min_block: "The planner would stop, but the minimum block keeps heating on.",
     override_min_pause: "The planner wants heat, but the minimum pause is still running.",
     override_budget: "The planner would stop, but today's switch budget is used up – heating stays on.",
+    override_startup: "Just started: waiting up to 5 min for sensors and forecast – the release stays as it was.",
     mode_observe: "Observe mode",
     mode_active: "Control active",
     forecast_age: "Forecast {min} min old",
@@ -201,6 +202,7 @@ const STR = {
     override_min_pause: "Der Planer will heizen, aber die Mindestpause läuft noch.",
     override_budget:
       "Der Planer würde stoppen, aber das Tagesbudget an Wechseln ist aufgebraucht – Heizung bleibt an.",
+    override_startup: "Gerade gestartet: bis zu 5 min Warten auf Sensoren und Prognose – die Freigabe bleibt, wie sie war.",
     mode_observe: "Beobachtungsmodus",
     mode_active: "Steuerung aktiv",
     forecast_age: "Prognose {min} min alt",
