@@ -70,8 +70,9 @@ def test_short_forecast_truncates_steps():
 
 
 def test_block_lengths_for():
-    assert block_lengths_for(3) == (3, 4, 6, 8)
-    assert block_lengths_for(9) == (9,)
+    assert block_lengths_for(3) == (3, 4, 6, 8, 10, 12)
+    assert block_lengths_for(9) == (10, 12)
+    assert block_lengths_for(13) == (13,)
 
 
 def test_budget_four_zones_52_steps():
@@ -90,4 +91,5 @@ def test_first_step_equals_live_plan_with_calibration():
     ro = rollout(zones, 52, RULES, ActuatorState(on=False))
     live = plan([replace(z, future=z.future[:24], comfort_low=z.comfort_low[:24]) for z in zones])
     assert ro.first.best == live.best and ro.first.cost == live.cost
-    assert ro.zones["eg"].std[0] == zones[0].model.predict(20.4, zones[0].future[:1]).std[0]  # raw σ in the log
+    first = replace(zones[0].future[0], q=zones[0].q_on if ro.on[0] else 0.0)  # σ depends on the heat input
+    assert ro.zones["eg"].std[0] == zones[0].model.predict(20.4, [first]).std[0]  # raw σ in the log

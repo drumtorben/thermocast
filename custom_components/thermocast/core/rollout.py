@@ -11,7 +11,18 @@ from dataclasses import dataclass, field, replace
 from .planner import CostFn, PlanResult, ZonePlanInput, default_cost, plan
 from .rules import Rules, apply_rules
 
-DEFAULT_BLOCK_LENGTHS: tuple[int, ...] = (2, 3, 4, 6, 8)
+DEFAULT_BLOCK_LENGTHS: tuple[int, ...] = (2, 3, 4, 6, 8, 10, 12)
+
+
+def window(zi: ZonePlanInput, start: int, n: int | None = None) -> dict:
+    """Per-hour lists of a zone input cut to [start, start + n) – for ``replace(zi, **window(...))``."""
+    end = None if n is None else start + n
+    return {
+        "future": zi.future[start:end],
+        "comfort_low": zi.comfort_low[start:end],
+        "comfort_high": zi.comfort_high[start:end],
+        "charge_cap": zi.charge_cap[start:end],
+    }
 
 
 def block_lengths_for(min_block_h: float) -> tuple[int, ...]:
@@ -94,12 +105,12 @@ def rollout(
             n = min(lookahead, available - h)
             inputs = [
                 replace(
-                    zi, temp_now=temps[zi.name], future=zi.future[h : h + n], comfort_low=zi.comfort_low[h : h + n],
+                    zi, temp_now=temps[zi.name], **window(zi, h, n),
                     var0=var[zi.name], history=hist[zi.name], scale_offset=h,
                 )
                 for zi in zones
             ]
-            res = plan(inputs, block_lengths=block_lengths, z=z, cost_fn=cost_fn, shortcut=h > 0)
+            res = plan(inputs, block_lengths=block_lengths, z=z, cost_fn=cost_fn, shortcut=h > 0, running=on)
             if h == 0:
                 first = res
             want = res.heat_now
@@ -114,7 +125,9 @@ def rollout(
 
         for zi in zones:
             name = zi.name
-            rec = replace(zi.future[h], q=zi.q_on if on else 0.0)
+            cap = zi.cap_at(h)
+            heats = on and (cap is None or temps[name] < cap)  # the thermostat closes at its cap
+            rec = replace(zi.future[h], q=zi.q_on if heats else 0.0)
             p = zi.model.predict(temps[name], [rec], var0=var[name], history=hist[name])
             tr = trajs[name]
             tr.mean.append(p.mean[0])

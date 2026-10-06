@@ -6,8 +6,8 @@ from datetime import UTC, date, datetime, time, timedelta, tzinfo
 from typing import Any
 
 from .explain import explain, robustness
-from .planner import ZonePlanInput, plan
-from .rollout import DEFAULT_BLOCK_LENGTHS, ActuatorState, RolloutResult, rollout
+from .planner import CostFn, ZonePlanInput, default_cost, plan
+from .rollout import DEFAULT_BLOCK_LENGTHS, ActuatorState, RolloutResult, rollout, window
 from .rules import Rules
 
 VIEW_VERSION = 1
@@ -74,11 +74,14 @@ def compute_outlook(
     z: float = 1.0,
     lookahead: int = 24,
     block_lengths: tuple[int, ...] = DEFAULT_BLOCK_LENGTHS,
+    cost_fn: CostFn = default_cost,
 ) -> Outlook:
     """CPU part (run in an executor): rollout, z=0 comparison plan, explanation."""
-    ro = rollout(zones, steps, rules, state, day_index, lookahead=lookahead, block_lengths=block_lengths, z=z)
-    first_inputs = [replace(zi, future=zi.future[:lookahead], comfort_low=zi.comfort_low[:lookahead]) for zi in zones]
-    res_z0 = plan(first_inputs, block_lengths=block_lengths, z=0.0)
+    ro = rollout(
+        zones, steps, rules, state, day_index, lookahead=lookahead, block_lengths=block_lengths, z=z, cost_fn=cost_fn
+    )
+    first_inputs = [replace(zi, **window(zi, 0, lookahead)) for zi in zones]
+    res_z0 = plan(first_inputs, block_lengths=block_lengths, z=0.0, cost_fn=cost_fn)
     return Outlook(ro, first_inputs, explain(ro.first, first_inputs, hour0, z), robustness(ro.first, res_z0))
 
 

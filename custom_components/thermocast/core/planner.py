@@ -25,6 +25,9 @@ class ZonePlanInput:
     history: list[HourRecord] | None = None  # lag history override (rollout)
     std_scale: tuple[float, ...] = ()  # calibrated σ factor per hour ahead of *now* (index 0 = 1 h)
     scale_offset: int = 0  # hours between now and future[0] (rollout re-plans)
+    comfort_high: list[float | None] = field(default_factory=list)  # upper bound per hour, empty = none
+    # charge cap per hour: a thermostat closes the valve once the room reaches it (empty/None = uncapped)
+    charge_cap: list[float | None] = field(default_factory=list)
 
     def predict(self, records: list[HourRecord]) -> Prediction:
         pred = self.model.predict(self.temp_now, records, var0=self.var0, history=self.history)
@@ -33,11 +36,33 @@ class ZonePlanInput:
             pred.std = [s * self.std_scale[min(self.scale_offset + i, last)] for i, s in enumerate(pred.std)]
         return pred
 
+    def cap_at(self, i: int) -> float | None:
+        return self.charge_cap[i] if i < len(self.charge_cap) else None
+
+    def heating_records(self, cand: Candidate) -> list[HourRecord]:
+        """Forecast inputs with the block's heating; capped hours (room at its cap) get no heat."""
+        recs = [replace(rec, q=self.q_on if cand.active(i) else 0.0) for i, rec in enumerate(self.future)]
+        if not any(c is not None for c in self.charge_cap) or cand.start is None:
+            return recs
+        for _ in range(3):  # closing the valve changes the later hours – a few passes settle it
+            mean = self.predict(recs).mean
+            changed = False
+            for i in range(len(recs)):
+                start_temp = self.temp_now if i == 0 else mean[i - 1]
+                cap = self.cap_at(i)
+                if recs[i].q > 0 and cap is not None and start_temp >= cap:
+                    recs[i] = replace(recs[i], q=0.0)
+                    changed = True
+            if not changed:
+                break
+        return recs
+
 
 @dataclass
 class Candidate:
     start: int | None  # hour offset, None = no block
     length: int = 0
+    continues: bool = False  # starts now while a block is already running: no new burner start
 
     def active(self, hour: int) -> bool:
         return self.start is not None and self.start <= hour < self.start + self.length
@@ -66,17 +91,50 @@ class PlanResult:
         return self.best.active(0)
 
 
-CostFn = Callable[[Candidate, float], dict[str, float]]
+# (candidate, K·h too cold, K·h too warm, coast hours after the block until the next block is needed)
+CostFn = Callable[[Candidate, float, float, float], dict[str, float]]
+MIN_COAST_H = 2  # a "next block" sooner than this is no real pause – its violations stay with this candidate
 
 
-def default_cost(candidate: Candidate, comfort_violation: float) -> dict[str, float]:
-    """Gas boiler: comfort first, then few starts, then little energy."""
+def default_cost(
+    candidate: Candidate, comfort_violation: float, overheat: float = 0.0, coast_h: float = 0.0
+) -> dict[str, float]:
+    """Gas boiler: comfort first, then few starts, then little energy (ignores upper bound and coast)."""
     parts = {"comfort": 20.0 * comfort_violation, "start": 0.0, "energy": 0.0, "delay": 0.0}
     if candidate.start is not None:
         parts["start"] = 1.0  # one burner start-up phase
         parts["energy"] = 0.15 * candidate.length
         parts["delay"] = 0.01 * candidate.start  # prefer late starts slightly (less loss)
     return parts
+
+
+def charge_cost(weight: float) -> CostFn:
+    """Charge and coast: ``weight`` 0 = little gas (short blocks), 1 = few burner starts (long blocks).
+
+    A start costs 1…10, a block hour 0.5…0.15 – both **per day**: scaled by 24 h / (block + coast), so a
+    block that stores enough heat for a long pause pays for itself. Staying below the lower bound costs
+    20 per K·h (leading zones), going above the upper bound 4 per K·h (all zones). Marked with
+    ``coast = True``: the planner leaves violations after the coast to the next block.
+    """
+    w = min(1.0, max(0.0, weight))
+
+    def cost(candidate: Candidate, comfort_violation: float, overheat: float, coast_h: float) -> dict[str, float]:
+        parts = {"comfort": 20.0 * comfort_violation, "overheat": 4.0 * overheat, "start": 0.0, "energy": 0.0,
+                 "delay": 0.0}
+        if candidate.start is not None:
+            per_day = 24.0 / max(1.0, candidate.length + coast_h)
+            parts["start"] = 0.0 if candidate.continues else (1.0 + 9.0 * w) * per_day
+            parts["energy"] = (0.5 - 0.35 * w) * candidate.length * per_day
+            parts["delay"] = 0.01 * candidate.start
+        return parts
+
+    cost.coast = True  # type: ignore[attr-defined]
+    return cost
+
+
+def overheat_kh(pred: Prediction, comfort_high: list[float | None]) -> float:
+    """K·h of the mean above the upper bound."""
+    return sum(max(0.0, m - hi) for m, hi in zip(pred.mean, comfort_high) if hi is not None)
 
 
 def violations(pred: Prediction, comfort_low: list[float | None], z: float) -> list[tuple[int, float]]:
@@ -90,29 +148,70 @@ def _violation(pred: Prediction, comfort_low: list[float | None], z: float) -> f
     return sum(d for _, d in violations(pred, comfort_low, z))
 
 
-def _with_block(zone: ZonePlanInput, cand: Candidate) -> list[HourRecord]:
-    return [replace(rec, q=zone.q_on if cand.active(i) else 0.0) for i, rec in enumerate(zone.future)]
+def _counted(
+    viol: list[tuple[int, float]], cand: Candidate, horizon: int, coast_mode: bool
+) -> tuple[float, float]:
+    """(K·h of violation this candidate is charged for, coast hours after its block).
+
+    Coast = hours from the block end until the first violation after it (or the horizon end). In coast
+    mode that later violation is the next block's job – unless the pause would be shorter than
+    ``MIN_COAST_H``, then this candidate keeps it.
+    """
+    total = sum(d for _, d in viol)
+    if cand.start is None:
+        return total, 0.0
+    end = cand.start + cand.length
+    after = [i for i, _ in viol if i >= end]
+    first = min(after) if after else horizon
+    coast = float(max(0, first - end))
+    if coast_mode and after and coast >= MIN_COAST_H:
+        return sum(d for i, d in viol if i < first), coast
+    return total, coast
+
+
+def _coast_beyond(preds: dict[str, Prediction], zones: list[ZonePlanInput], z: float, cap_h: float = 24.0) -> float:
+    """Hours the stored heat still lasts after the horizon: (end temperature − lower bound) / cooling rate
+    of the last 3 h, the shortest over the leading zones. Lets the planner value a longer charge
+    that already covers the whole horizon."""
+    out = cap_h
+    for zz in zones:
+        pred = preds.get(zz.name)
+        bounds = [b for b in zz.comfort_low if b is not None]
+        if pred is None or len(pred.mean) < 4 or not bounds:
+            continue
+        lower = pred.lower(z)
+        rate = max(0.02, (lower[-4] - lower[-1]) / 3.0)  # K/h, at least a slow drift
+        floor = zz.comfort_low[-1] if zz.comfort_low[-1] is not None else min(bounds)
+        out = min(out, max(0.0, (lower[-1] - floor) / rate))
+    return out
 
 
 def plan(
     zones: list[ZonePlanInput],
-    block_lengths: tuple[int, ...] = (2, 3, 4, 6, 8),
+    block_lengths: tuple[int, ...] = (2, 3, 4, 6, 8, 10, 12),
     start_step: int = 1,
     z: float = 1.0,
     cost_fn: CostFn = default_cost,
     shortcut: bool = False,
+    running: bool = False,
 ) -> PlanResult:
     """Choose the cheapest block. ``shortcut`` skips the search when no leading zone is violated
     without heating – valid for cost functions where an unneeded block never pays off (default_cost)."""
     leading = [zz for zz in zones if zz.leads_release]
+    bounded = [zz for zz in zones if any(h is not None for h in zz.comfort_high)]  # upper bound counts for all
+    scored_zones = leading + [zz for zz in bounded if not zz.leads_release]
     horizon = min((len(zz.future) for zz in zones), default=0)
 
     free = {zz.name: zz.predict(zz.future) for zz in zones}
     free_violation = {zz.name: _violation(free[zz.name], zz.comfort_low, z) for zz in zones}
+    free_overheat = sum(overheat_kh(free[zz.name], zz.comfort_high) for zz in bounded)
 
-    if shortcut and sum(free_violation[zz.name] for zz in leading) == 0.0:
+    coast_mode = bool(getattr(cost_fn, "coast", False))
+
+    # a running charge may pay off without any violation in sight (longer coast) – no shortcut then
+    if shortcut and not (running and coast_mode) and sum(free_violation[zz.name] for zz in leading) == 0.0:
         none = Candidate(None)
-        parts = cost_fn(none, 0.0)
+        parts = cost_fn(none, 0.0, free_overheat, 0.0)
         scored = ScoredCandidate(none, sum(parts.values()), parts, 0.0, {zz.name: free[zz.name] for zz in leading})
         return PlanResult(
             best=none, cost=scored.cost, free_run=free, planned=dict(free),
@@ -122,17 +221,23 @@ def plan(
     candidates = [Candidate(None)]
     for length in block_lengths:
         for start in range(0, max(horizon - length + 1, 0), start_step):
-            candidates.append(Candidate(start, length))
+            candidates.append(Candidate(start, length, continues=running and start == 0))
 
     scored_all: list[ScoredCandidate] = []
     for cand in candidates:
         preds: dict[str, Prediction] = {}
-        violation = 0.0
-        for zz in leading:
-            pred = free[zz.name] if cand.start is None else zz.predict(_with_block(zz, cand))
-            preds[zz.name] = pred
-            violation += _violation(pred, zz.comfort_low, z)
-        parts = cost_fn(cand, violation)
+        viol: list[tuple[int, float]] = []
+        overheat = 0.0
+        for zz in scored_zones:
+            pred = free[zz.name] if cand.start is None else zz.predict(zz.heating_records(cand))
+            if zz.leads_release:
+                preds[zz.name] = pred
+                viol += violations(pred, zz.comfort_low, z)
+            overheat += overheat_kh(pred, zz.comfort_high)
+        violation, coast = _counted(viol, cand, horizon, coast_mode)
+        if coast_mode and cand.start is not None and not any(i >= cand.start + cand.length for i, _ in viol):
+            coast += _coast_beyond(preds, leading, z)  # no next block needed inside the horizon
+        parts = cost_fn(cand, violation, overheat, coast)
         scored_all.append(ScoredCandidate(cand, sum(parts.values()), parts, violation, preds))
 
     ranked = sorted(scored_all, key=lambda s: s.cost)  # stable: ties keep search order
@@ -144,7 +249,7 @@ def plan(
         elif zz.name in best.preds:
             planned[zz.name] = best.preds[zz.name]
         else:
-            planned[zz.name] = zz.predict(_with_block(zz, best.candidate))
+            planned[zz.name] = zz.predict(zz.heating_records(best.candidate))
     return PlanResult(
         best=best.candidate, cost=best.cost, free_run=free, planned=planned,
         violation_free=free_violation, ranked=ranked,
