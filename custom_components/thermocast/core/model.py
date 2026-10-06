@@ -165,6 +165,7 @@ class OnlineZoneModel:
 
     # ------------------------------------------------------------------ layout
     def _build_layout(self) -> None:
+        self._surface_lags = [(s.key, s.lags) for s in self.spec.surfaces]  # features() runs per predicted hour
         names: list[str] = ["bias", "loss"]
         nonneg: list[bool] = [False, True]
         for s in self.spec.surfaces:
@@ -225,9 +226,9 @@ class OnlineZoneModel:
             return history[0] if history else rec
 
         phi = [1.0, rec.t_out - rec.temp]
-        for s in self.spec.surfaces:
-            for lag in s.lags:
-                phi.append(past(lag).irr.get(s.key, 0.0))
+        for key, lags in self._surface_lags:
+            for lag in lags:
+                phi.append(past(lag).irr.get(key, 0.0))
         for lag in self.spec.heat_lags:
             phi.append(past(lag).q)
         for i in range(self.spec.n_neighbors):
@@ -287,6 +288,7 @@ class OnlineZoneModel:
         future: list[HourRecord],
         var0: float = 0.0,
         history: list[HourRecord] | None = None,
+        with_contrib: bool = True,
     ) -> Prediction:
         """Roll the model forward. ``future[i].temp`` is ignored (simulated).
 
@@ -312,14 +314,15 @@ class OnlineZoneModel:
             )
             phi = self.features(r, hist)
             terms = phi * self.theta
-            contrib: dict[str, float] = {}
-            for group, value in zip(self.groups, terms):
-                contrib[group] = contrib.get(group, 0.0) + float(value)
+            if with_contrib:
+                contrib: dict[str, float] = {}
+                for group, value in zip(self.groups, terms):
+                    contrib[group] = contrib.get(group, 0.0) + float(value)
+                contribs.append(contrib)
             temp = temp + float(terms.sum())
             var += sigma2 + float(phi @ self.P @ phi) * sigma2
             means.append(temp)
             stds.append(math.sqrt(var))
-            contribs.append(contrib)
             hist.append(r)
             if len(hist) > keep:
                 hist = hist[-keep:]

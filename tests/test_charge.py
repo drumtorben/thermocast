@@ -117,6 +117,30 @@ def test_running_block_is_continued_without_a_new_start():
     assert not later.candidate.continues and later.parts["start"] > 0
 
 
+def test_overheat_ignores_uncapped_following_zones():
+    """A following radiator room without BT control is limited by its own thermostat – not the planner's business."""
+    lead = _zone(t_out=-5.0, high=30.0)
+    follow = _zone(t_out=-5.0, high=20.6)
+    follow = type(follow)(**{**follow.__dict__, "name": "f", "leads_release": False})
+    res = plan([lead, follow], cost_fn=charge_cost(0.8), z=0.0)
+    assert all(s.parts["overheat"] == 0.0 for s in res.ranked)
+
+
+def test_budget_realistic_four_zones_52_steps():
+    import os
+    import time
+
+    zones = []
+    for i in range(4):
+        z = _zone(t_out=3.0, temp=20.3, high=21.5, cap=None if i == 0 else 21.5, radiator=i > 0)
+        zones.append(type(z)(**{**z.__dict__, "name": f"z{i}", "leads_release": i < 2}))
+    t0 = time.perf_counter()
+    rollout(zones, 52, RULES, ActuatorState(on=False), cost_fn=charge_cost(0.8), z=1.0)
+    elapsed = time.perf_counter() - t0
+    budget = 5.0 if os.environ.get("CI") else 2.0  # dev Mac; shared CI runners are ~2× slower
+    assert elapsed < budget, elapsed
+
+
 def test_rollout_respects_the_charge_cap():
     ro = rollout([_zone(t_out=-5.0, cap=21.0, radiator=True)], 30, RULES, ActuatorState(on=False), cost_fn=charge_cost(0.8), z=0.0)
     assert max(ro.zones["z"].mean) < 21.3

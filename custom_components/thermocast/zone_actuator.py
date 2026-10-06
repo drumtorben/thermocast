@@ -73,6 +73,11 @@ class ZoneActuator:
     def load(self, data: dict[str, Any]) -> None:
         self.state = {zid: BtZoneState.from_dict(s) for zid, s in (data or {}).items()}
 
+    def forget_writes(self) -> None:
+        """Control (re)starts: whatever the thermostats show now is the starting point, not a manual override."""
+        for s in self.state.values():
+            s.last_written = s.override_until = None
+
     async def async_apply(
         self,
         zones: dict[str, ZoneRuntime],
@@ -83,6 +88,7 @@ class ZoneActuator:
         enabled: bool,
         now: datetime,
         block_end: datetime | None = None,
+        detect_override: bool = True,
     ) -> dict[str, dict[str, Any]]:
         """Decide (and, when ``enabled``, write) every BT-controlled zone. Returns per zone
         ``{"target", "reason", "override_until"}`` for the panel."""
@@ -101,9 +107,9 @@ class ZoneActuator:
             if current == "unavailable":
                 out[zid] = {"target": None, "reason": "unavailable", "override_until": None}
                 continue
-            if enabled:
+            if enabled and detect_override:
                 self._detect_override(zid, z, s, current, now, block_end)
-            if s.override_until is not None:
+            if s.override_until is not None:  # a running manual override wins, also over a fail-safe
                 if now < s.override_until:
                     out[zid] = {"target": current, "reason": "override", "override_until": s.override_until.isoformat()}
                     continue
@@ -154,4 +160,6 @@ class ZoneActuator:
 
     async def async_failsafe(self, zones: dict[str, ZoneRuntime], temps: dict[str, float | None]) -> None:
         """Steuerung aus / unload: hold every controlled zone at its lower bound (quiet time respected)."""
-        await self.async_apply(zones, temps, block_on=False, failsafe=True, enabled=True, now=dt_util.utcnow())
+        await self.async_apply(
+            zones, temps, block_on=False, failsafe=True, enabled=True, now=dt_util.utcnow(), detect_override=False
+        )

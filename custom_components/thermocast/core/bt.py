@@ -40,7 +40,10 @@ def bt_decide(inp: BtInput) -> tuple[float | None, str]:
     if inp.quiet_now or inp.quiet_soon:
         target = round_target(inp.base)
         cold = inp.quiet_now and inp.leads and inp.temp < inp.base - COLD_MARGIN
-        if inp.quiet_now and not cold:
+        settled = inp.last_written is not None and abs(inp.last_written - target) < STEP / 2
+        # in quiet time only the base itself is written – once (a missed lead window must not leave the
+        # room at its upper bound all night), or again for a cold leading zone
+        if inp.quiet_now and settled and not cold:
             return None, "quiet"
     else:
         target = round_target(inp.high if inp.block_on and not inp.failsafe else inp.floor_now)

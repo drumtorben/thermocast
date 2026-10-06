@@ -34,14 +34,17 @@ def test_failsafe_holds_the_floor_even_during_a_block():
 def test_quiet_time_floor_before_it_starts_then_silence():
     assert bt_decide(replace(BASE, block_on=True, quiet_soon=True)) == (17.0, "write")  # 15 min ahead: floor once
     assert bt_decide(replace(BASE, block_on=True, quiet_now=True, last_written=17.0)) == (None, "quiet")
-    # a missed lead window: no write inside the quiet time either
-    assert bt_decide(replace(BASE, quiet_now=True, last_written=21.5)) == (None, "quiet")
+
+
+def test_missed_lead_window_still_sets_the_base_once():
+    """Restart or a shifted update at 18:50: the room must not stay at its upper bound all night."""
+    assert bt_decide(replace(BASE, block_on=True, quiet_now=True, last_written=21.5)) == (17.0, "write")
+    assert bt_decide(replace(BASE, block_on=True, quiet_now=True, last_written=17.0)) == (None, "quiet")
 
 
 def test_quiet_exception_for_a_cold_leading_zone():
     cold = replace(BASE, quiet_now=True, last_written=15.0, temp=15.9)  # base 17 − 1 K
     assert bt_decide(cold) == (17.0, "write")
-    assert bt_decide(replace(cold, leads=False)) == (None, "quiet")
 
 
 def test_daily_budget_and_unknown_temperature():

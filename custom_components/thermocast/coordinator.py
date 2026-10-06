@@ -446,6 +446,8 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
         self.events.add(dt_util.utcnow(), "control_on" if enabled else "control_off")
         if enabled and self.control_since is None:
             self.control_since = dt_util.utcnow()  # KPI before/after split
+        if enabled:
+            self.zone_actuator.forget_writes()  # changes made while observing are no manual override
         if not enabled:
             await self.actuator.async_force_on()  # hand control back: heating allowed
             await self.zone_actuator.async_failsafe(self.zones, self.zone_temps())  # rooms at their lower bound
@@ -501,6 +503,10 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
             self._update_failsafe_issue(dt_util.utcnow(), "update_error")
             if self.control_enabled:
                 await self.actuator.async_force_on()
+                try:  # thermostats back to their lower bound – no charging while blind
+                    await self.zone_actuator.async_failsafe(self.zones, self.zone_temps())
+                except Exception:
+                    _LOGGER.exception("Thermocast: thermostat fail-safe failed")
             raise UpdateFailed(str(err)) from err
 
     async def _update(self) -> ThermocastData:

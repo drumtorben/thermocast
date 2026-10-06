@@ -30,7 +30,8 @@ class ZonePlanInput:
     charge_cap: list[float | None] = field(default_factory=list)
 
     def predict(self, records: list[HourRecord]) -> Prediction:
-        pred = self.model.predict(self.temp_now, records, var0=self.var0, history=self.history)
+        # the planner only scores mean/σ – the cause split is computed where it is shown (rollout, hindcast)
+        pred = self.model.predict(self.temp_now, records, var0=self.var0, history=self.history, with_contrib=False)
         if self.std_scale:
             last = len(self.std_scale) - 1
             pred.std = [s * self.std_scale[min(self.scale_offset + i, last)] for i, s in enumerate(pred.std)]
@@ -39,23 +40,32 @@ class ZonePlanInput:
     def cap_at(self, i: int) -> float | None:
         return self.charge_cap[i] if i < len(self.charge_cap) else None
 
+    @property
+    def capped(self) -> bool:
+        return any(c is not None for c in self.charge_cap)
+
     def heating_records(self, cand: Candidate) -> list[HourRecord]:
         """Forecast inputs with the block's heating; capped hours (room at its cap) get no heat."""
+        return self.heating_prediction(cand)[0]
+
+    def heating_prediction(self, cand: Candidate) -> tuple[list[HourRecord], Prediction]:
+        """(inputs, prediction) with the block's heating; a capped zone's thermostat closes at its cap."""
         recs = [replace(rec, q=self.q_on if cand.active(i) else 0.0) for i, rec in enumerate(self.future)]
-        if not any(c is not None for c in self.charge_cap) or cand.start is None:
-            return recs
+        pred = self.predict(recs)
+        if not self.capped or cand.start is None:
+            return recs, pred
         for _ in range(3):  # closing the valve changes the later hours – a few passes settle it
-            mean = self.predict(recs).mean
             changed = False
             for i in range(len(recs)):
-                start_temp = self.temp_now if i == 0 else mean[i - 1]
+                start_temp = self.temp_now if i == 0 else pred.mean[i - 1]
                 cap = self.cap_at(i)
                 if recs[i].q > 0 and cap is not None and start_temp >= cap:
                     recs[i] = replace(recs[i], q=0.0)
                     changed = True
             if not changed:
                 break
-        return recs
+            pred = self.predict(recs)
+        return recs, pred
 
 
 @dataclass
@@ -198,7 +208,9 @@ def plan(
     """Choose the cheapest block. ``shortcut`` skips the search when no leading zone is violated
     without heating – valid for cost functions where an unneeded block never pays off (default_cost)."""
     leading = [zz for zz in zones if zz.leads_release]
-    bounded = [zz for zz in zones if any(h is not None for h in zz.comfort_high)]  # upper bound counts for all
+    # the upper bound counts where the planner's heat lands: leading zones and zones whose thermostat it sets
+    # (other rooms are limited by their own thermostats)
+    bounded = [zz for zz in zones if (zz.leads_release or zz.capped) and any(h is not None for h in zz.comfort_high)]
     scored_zones = leading + [zz for zz in bounded if not zz.leads_release]
     horizon = min((len(zz.future) for zz in zones), default=0)
 
@@ -218,9 +230,15 @@ def plan(
             violation_free=free_violation, ranked=[scored],
         )
 
+    # a block starting after the first violation cannot prevent it – in coast mode those candidates only
+    # cost time (the next re-plan covers later blocks); a running block with nothing in sight: continue or stop
+    latest = horizon
+    if coast_mode:
+        first = [v[0][0] for zz in leading if (v := violations(free[zz.name], zz.comfort_low, z))]
+        latest = min(first) + 1 if first else (1 if running else horizon)
     candidates = [Candidate(None)]
     for length in block_lengths:
-        for start in range(0, max(horizon - length + 1, 0), start_step):
+        for start in range(0, min(max(horizon - length + 1, 0), latest), start_step):
             candidates.append(Candidate(start, length, continues=running and start == 0))
 
     scored_all: list[ScoredCandidate] = []
@@ -229,7 +247,7 @@ def plan(
         viol: list[tuple[int, float]] = []
         overheat = 0.0
         for zz in scored_zones:
-            pred = free[zz.name] if cand.start is None else zz.predict(zz.heating_records(cand))
+            pred = free[zz.name] if cand.start is None else zz.heating_prediction(cand)[1]
             if zz.leads_release:
                 preds[zz.name] = pred
                 viol += violations(pred, zz.comfort_low, z)
@@ -249,7 +267,7 @@ def plan(
         elif zz.name in best.preds:
             planned[zz.name] = best.preds[zz.name]
         else:
-            planned[zz.name] = zz.predict(zz.heating_records(best.candidate))
+            planned[zz.name] = zz.heating_prediction(best.candidate)[1]
     return PlanResult(
         best=best.candidate, cost=best.cost, free_run=free, planned=planned,
         violation_free=free_violation, ranked=ranked,

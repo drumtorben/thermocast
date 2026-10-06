@@ -77,6 +77,38 @@ async def test_control_writes_once_and_detects_a_manual_change(
     assert len(calls) == 2
 
 
+async def test_changes_made_in_observe_mode_are_no_override(
+    hass: HomeAssistant, mock_entry, mock_open_meteo, freezer
+) -> None:
+    calls = await _setup(hass, mock_entry, freezer)
+    coordinator = mock_entry.runtime_data
+    await coordinator.async_set_control(True)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    await coordinator.async_set_control(False)  # writes the lower bound
+    await hass.async_block_till_done(wait_background_tasks=True)
+    hass.states.async_set(BT, "heat", {"temperature": 22.5})  # adjusted by hand while observing
+    await coordinator.async_set_control(True)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert coordinator.data.bt["zone_eg"]["reason"] != "override"
+    assert "bt_override" not in [e["type"] for e in coordinator.events.to_list()]
+    assert calls[-1].data["temperature"] in (20.0, 21.5)  # Thermocast takes the room over again
+
+
+async def test_update_error_holds_the_lower_bound(hass: HomeAssistant, mock_entry, mock_open_meteo, freezer) -> None:
+    from unittest.mock import patch
+
+    calls = await _setup(hass, mock_entry, freezer)
+    coordinator = mock_entry.runtime_data
+    await coordinator.async_set_control(True)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    coordinator.zone_actuator.state["zone_eg"].last_written = 21.5  # as if a block were charging
+    hass.states.async_set(BT, "heat", {"temperature": 21.5})
+    n = len(calls)
+    with patch.object(coordinator, "_forecast_and_plan", side_effect=RuntimeError("boom")):
+        await _tick(hass, freezer)
+    assert len(calls) == n + 1 and calls[-1].data["temperature"] == 20.0
+
+
 async def test_unavailable_thermostat_is_left_alone(hass: HomeAssistant, mock_entry, mock_open_meteo, freezer) -> None:
     calls = await _setup(hass, mock_entry, freezer)
     hass.states.async_set(BT, "unavailable", {})
