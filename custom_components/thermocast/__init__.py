@@ -38,8 +38,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ThermocastConfigEntry) -
     await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    await panel.async_register_static(hass)
-    await panel.async_register_panel(hass, str((await async_get_integration(hass, DOMAIN)).version))
+    version = str((await async_get_integration(hass, DOMAIN)).version)
+    await panel.async_register_static(hass, version)
+    await panel.async_register_panel(hass, version)
     # a zone added while this setup was running (e.g. two zones saved quickly) needs another reload
     configured = {sid for sid, sub in entry.subentries.items() if sub.subentry_type == SUBENTRY_ZONE}
     if configured != set(coordinator.zones):

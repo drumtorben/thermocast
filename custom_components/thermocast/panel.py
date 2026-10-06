@@ -14,14 +14,21 @@ STATIC_URL = "/thermocast_static"
 _STATIC_FLAG = f"{DOMAIN}_static_registered"
 
 
-async def async_register_static(hass: HomeAssistant) -> None:
-    """Static paths cannot be removed – register once per HA run."""
-    if hass.data.get(_STATIC_FLAG):
+def static_base(version: str) -> str:
+    """One path per release: the panel's modules import each other relatively (tc-*.js, i18n.js) and are
+    served without cache headers – under an unchanged URL browsers kept stale modules after an update."""
+    return f"{STATIC_URL}/{version}"
+
+
+async def async_register_static(hass: HomeAssistant, version: str) -> None:
+    """Static paths cannot be removed – register once per HA run and version."""
+    done: set[str] = hass.data.setdefault(_STATIC_FLAG, set())
+    if version in done:
         return
     await hass.http.async_register_static_paths(
-        [StaticPathConfig(STATIC_URL, str(Path(__file__).parent / "frontend"), cache_headers=False)]
+        [StaticPathConfig(static_base(version), str(Path(__file__).parent / "frontend"), cache_headers=False)]
     )
-    hass.data[_STATIC_FLAG] = True
+    done.add(version)
 
 
 async def async_register_panel(hass: HomeAssistant, version: str) -> None:
@@ -32,7 +39,7 @@ async def async_register_panel(hass: HomeAssistant, version: str) -> None:
         webcomponent_name="thermocast-panel",
         sidebar_title="Thermocast",
         sidebar_icon="mdi:home-thermometer",
-        module_url=f"{STATIC_URL}/thermocast-panel.js?v={version}",
+        module_url=f"{static_base(version)}/thermocast-panel.js",
         require_admin=False,
     )
 

@@ -17,11 +17,25 @@ async def test_panel_registered_and_removed(hass: HomeAssistant, mock_entry, moc
     await _setup_entry(hass, mock_entry)
     panel = hass.data[DATA_PANELS]["thermocast"]
     assert panel.sidebar_title == "Thermocast"
+    # every release gets its own path: browsers cannot keep stale modules (tc-*.js, i18n.js) after an update
+    module_url = panel.config["_panel_custom"]["module_url"]
+    assert module_url.startswith("/thermocast_static/") and module_url.endswith("/thermocast-panel.js")
+    base = module_url.rsplit("/", 1)[0]
+    assert base != "/thermocast_static"
     client = await hass_client()
-    resp = await client.get("/thermocast_static/lit.js")
+    resp = await client.get(f"{base}/lit.js")
     assert resp.status == 200
     assert await hass.config_entries.async_unload(mock_entry.entry_id)
     assert "thermocast" not in hass.data[DATA_PANELS]
+
+
+async def test_diagnostics_while_not_loaded(hass: HomeAssistant, mock_entry, mock_open_meteo) -> None:
+    """Downloading diagnostics during a reload must not raise (500)."""
+    from custom_components.thermocast.diagnostics import async_get_config_entry_diagnostics
+
+    mock_entry.add_to_hass(hass)
+    data = await async_get_config_entry_diagnostics(hass, mock_entry)
+    assert data["loaded"] is False and data["zones"]
 
 
 async def test_subscribe_pushes_view(hass: HomeAssistant, mock_entry, mock_open_meteo, hass_ws_client) -> None:
