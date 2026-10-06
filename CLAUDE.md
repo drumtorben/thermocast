@@ -38,7 +38,8 @@ Hausspezifisches (Familie, Räume, Verbrauch, Ort, Zonenplan) steht in **`CLAUDE
   angebunden über **EMS-ESP** (MQTT). ⚠️ RC310-Einstellungen liegen im EEPROM → Schreibzugriffe begrenzen.
 - **EG + Bad OG:** Fußbodenheizung ohne Verteiler/Stellantriebe (Rücklaufbegrenzer je Raum) →
   eine FBH-Zone ohne Stellglied, führt die Freigabe.
-- **OG/Dachboden:** Heizkörper mit Zigbee-TRVs (Better Thermostat). Thermocast stellt TRVs **nie**.
+- **OG/Dachboden:** Heizkörper mit Zigbee-TRVs (Better Thermostat). Thermocast stellt TRVs **nie direkt**;
+  optional (je Zone) setzt es den **BT-Sollwert** (Laden im Block, sonst Untergrenze, Ruhezeiten).
 - **Warmwasser** über denselben Kessel: WW-Ladungen heben den Vorlauf → Heiz-Proxy nur bei laufender
   **Heizungspumpe**, nicht über den Vorlauf allein.
 - **Recorder** ohne include-Filter (sonst bricht u. a. das Energie-Dashboard), Langzeitstatistiken
@@ -54,7 +55,9 @@ custom_components/thermocast/
 ├── core/                 # reines Python + numpy, KEIN HA-Import (Notebook/Test-tauglich)
 │   ├── model.py          # OnlineZoneModel: ARX-Grey-Box + RLS, SurfaceSpec, ZoneSpec, HourRecord
 │   ├── forecast.py       # Open-Meteo: temperature_2m + global_tilted_irradiance je (tilt, azimuth)
-│   ├── planner.py        # Blockplaner: kein Block | Start 0..H × Länge {2,3,4,6,8} h, CostFn → Komponenten-Dict
+│   ├── planner.py        # Blockplaner: kein Block | Start 0..H × Länge {2,…,12} h, Ober-/Untergrenze,
+│   │                     #   Lade-Deckel (charge_cap), CostFn(cand, K·h kalt, K·h warm, Zehrzeit) → Komponenten
+│   ├── bt.py             # Better-Thermostat-Sollwert als reine Entscheidung (Laden/Untergrenze/Ruhezeit)
 │   ├── rules.py          # Aktor-Regeln als reine Funktionen (Live-Aktor + Rollout)
 │   ├── rollout.py        # Regler-Rollout bis morgen 24:00 (stündlich planen + Regeln anwenden)
 │   ├── explain.py        # Begründungs-Codes, Robustheit (knapp/σ-getrieben), Planänderung
@@ -65,6 +68,7 @@ custom_components/thermocast/
 ├── coordinator.py        # 15-min-Loop: Sensoren → Stunden-Sample → RLS-Update → Prognose → Plan → Aktor
 │                         #   + Stunden-Log, Param-Snapshots, control_since (alles im Store)
 ├── actuator.py           # Freigabe schalten: Mindestblock/-pause, Tagesbudget, Fail-safe
+├── zone_actuator.py      # BT-Sollwerte je Zone (opt-in): schreiben, Handeingriff erkennen, Fail-safe
 ├── view_builder.py       # Panel-Daten neben dem Regelpfad (Historie, Rollout, Schatten-Aktor, Snapshots,
 │                         #   Prognose-Log, Hindcast-Ursachen, WW-Anteil)
 ├── model_view.py, kpi_view.py  # Tab „Modell“ (+ JSON-Export), Tab „KPIs“ (Recorder-Langzeitstatistik)
@@ -108,9 +112,17 @@ T[t+1] − T[t] = b0 + a·(T_out − T)
 
 ### Planer / Kosten (Gaskessel)
 
-`20·Komfortverletzung + 1·Start + 0,15·Blockstunden + 0,01·Startverzögerung`.
-Nur Zonen mit `leads_release` zählen. Die Kostenfunktion ist injizierbar (`cost_fn`) – für
-die Wärmepumpe später COP(T_out, Vorlauf), Strompreis, PV-Überschuss.
+Live und im Rollout: `charge_cost(w)` („Laden & Zehren“, Spec `docs/superpowers/specs/2026-10-06-charge-and-coast-design.md`),
+`w` = Option „Wenige Brennerstarts ↔ wenig Gas“ / 100 (Standard 0,8):
+`20·K·h unter Untergrenze (führende Zonen) + 4·K·h über Obergrenze (alle) + [(1+9w) + (0,5−0,35w)·Länge]·24/(Länge+Zehrzeit) + 0,01·Start`.
+- Untergrenze = Komfort − Band in der Komfortzeit, sonst Grundwert; Obergrenze je Zone (Standard Komfort ± 1/2 K).
+- **Zehrzeit** = Stunden nach Blockende bis zur nächsten Unterschreitung (darüber hinaus aus der Abkühlrate
+  extrapoliert, ≤ 24 h). Unterschreitungen nach der Zehrzeit sind Sache des nächsten Blocks (außer Pause < 2 h).
+  Ohne das sah der Ein-Block-Planer den nächsten Start nie, und der Regler wirkte nicht.
+- Läuft ein Block schon (`running`), kostet Weiterheizen keinen Start (sonst bricht die Neuplanung Blöcke ab).
+- BT-gesteuerte Zonen sind gedeckelt (`charge_cap`): q = 0, sobald die Zone ihre Obergrenze (Ruhezeit: Grundwert) erreicht.
+`default_cost` (alt, ohne Obergrenze/Zehrzeit) bleibt für Tests/Vergleich. Die Kostenfunktion ist injizierbar –
+für die Wärmepumpe später COP(T_out, Vorlauf), Strompreis, PV-Überschuss.
 
 ### Aktor-Regeln (Sicherheit zuerst)
 
@@ -120,9 +132,14 @@ die Wärmepumpe später COP(T_out, Vorlauf), Strompreis, PV-Überschuss.
 - Gleicher Zustand wird nicht erneut geschrieben (EEPROM).
 - Fail-safe → AN: Update-Exception, Prognose > 2 h alt, fehlender Sensor einer führenden Zone,
   Integration entladen, Steuerung ausgeschaltet.
-- Empfohlene Freigabe-Entität: **RC310-Sommerschwelle als `number`** (16 = erlaubt, 10 = gesperrt)
-  → wenn HA ausfällt, heizt das RC310 bei Kälte selbst wieder. `select` Sommer/Winter geht auch,
-  bleibt aber bei HA-Ausfall gesperrt.
+- Fail-safe ist ein erzwungenes AN: wirkt auch in der Mindestpause und hinterlässt keine Mindestblock-Pflicht.
+- Empfohlene Freigabe-Entität: **RC310-Sommer/Winter-Modus (`select`)**, Winter = erlaubt, Auto = gesperrt,
+  Sommerschwelle fest 10 °C → ein Block heizt sicher auch an milden Tagen, Pumpe steht zwischen den Blöcken,
+  bei HA-Ausfall heizt das RC310 spätestens unter 10 °C. (Schwelle 16/10 allein wirkt nur bei Modus Auto
+  und nur unter 16 °C draußen; „Sommer“ als Sperre nur mit Absicherung außerhalb von HA.)
+- BT-Aktor (opt-in je Zone): im Block Obergrenze, sonst Untergrenze; nur bei Änderung, 0,5-K-Schritte,
+  15–24 °C, ≤ 24/Tag; Handeingriff → Zone ruht bis Blockende (≥ 3 h); Ruhezeit: 15 min vorher Grundwert,
+  dann nichts (Ausnahme: führende Zone < Grundwert − 1 K); Steuerung aus/Entladen → Untergrenze.
 
 ### Entitäten
 
@@ -171,9 +188,15 @@ Attr. Parameter + Sonnenantwort je Fläche).
   zwei Stores (kleiner Zustand debounced, Logs stündlich), Komfort aus `schedule`-Helfer,
   Diagnose-Download, Repair bei Fail-safe > 1 h, CI-Workflow (nie gelaufen – kein Remote),
   `docs/INSTALLATION-CHECKLISTE.md`.
+- ✅ v0.4.x (mit echter Anlage): Haus rekonfigurierbar, WW-Ladung aus dem Heiz-Proxy (Option), TRV-`hvac_action`
+  als Ventilsignal, Gateway-Boolean-Formate (ON/true/an), Fail-safe ohne Blockpflicht, Ereignisse im Tooltip.
+- ✅ v0.5.0 „Laden & Zehren“ Stufe 1 (Spec/Plan `…2026-10-06-charge-and-coast…`): Ober-/Untergrenze, Zehrzeit-
+  Kosten mit Regler, BT-Aktor mit Ruhezeiten, Panel (Obergrenze, BT-Treppe, Ruhezeit, Starts je Block).
+  Stufe 2 offen: Lade-Hebel (Vorlauf/Pumpe im Block) – erst nach Test des Hebels an der Anlage.
 - Bekannte Schwächen:
   - Prognose nutzt aktuelle Nachbartemperaturen/Gains als konstant über den Horizont.
-  - Planer kennt nur *einen* Block im Horizont (Rollout plant stündlich neu – reicht vorerst).
+  - Planer kennt nur *einen* Block im Horizont (Rollout plant stündlich neu; die Zehrzeit bewertet den nächsten Start).
+  - Im Block taktet der Brenner weiter, wenn das Haus < Mindestleistung abnimmt (→ Stufe 2, „Starts je Block“).
   - Warmstart nutzt Stundenmittel (leicht geglättete ΔT) und für den Heiz-Proxy den Stundenmittel-Vorlauf
     × Pumpen-Anteil – grober als live; der Vergessensfaktor wäscht das in Tagen aus.
   - Keine Anwesenheit (`zone.home`) im Komfort; nur Zeitplan.

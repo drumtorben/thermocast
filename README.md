@@ -64,12 +64,23 @@ Voraussetzung: Home Assistant ≥ 2026.9. Schritt für Schritt: [`docs/INSTALLAT
 
 | Variante | Entität | Wert „erlaubt“ | Wert „gesperrt“ | Verhalten bei HA-Ausfall |
 |---|---|---|---|---|
-| **A (empfohlen)** | Sommer-/Winter-Schwelle (`number`) | `16` | `10` | Heizung springt bei Kälte (< 10 °C gedämpft) selbst wieder an |
-| B | Sommerbetrieb (`select`) | `winter`/`auto` | `summer` | bleibt gesperrt, bis HA wieder läuft |
+| **A (empfohlen)** | Sommer-/Winter-Modus (`select`), Schwelle fest 10 °C | `Winter` | `Auto` | heizt weiter bzw. spätestens unter 10 °C (gedämpft) |
+| B | Sommer-/Winter-Schwelle (`number`) | `16` | `10` | wie A, aber ein Block heizt nur unter 16 °C draußen; im Winterbetrieb taktet die Pumpe |
+| C | Sommer-/Winter-Modus (`select`) | `Winter` | `Sommer` | bleibt gesperrt, bis HA wieder läuft – nur mit Absicherung außerhalb von HA |
 
-Variante A „degradiert sanft“: Fällt HA aus, während gesperrt ist, heizt das RC310 trotzdem,
-sobald es draußen kalt wird. Schreibzugriffe sind begrenzt (Standard ≤ 12/Tag), identische
-Werte werden nicht erneut geschrieben (EEPROM).
+Variante A „degradiert sanft“ und sorgt dafür, dass ein geplanter Block auch an milden Tagen wirklich heizt.
+Schreibzugriffe sind begrenzt (Wechsel ≤ 12/Tag, Schreibvorgänge ≤ 40/Tag mit Bestätigung und Backoff),
+identische Werte werden nicht erneut geschrieben (EEPROM).
+
+### Laden & Zehren: wenige lange Brennerläufe
+
+Ein überdimensionierter Kessel taktet, wenn er öfter kurz anspringt. Thermocast plant deshalb wenige lange
+Blöcke: während eines Blocks dürfen die Zonen bis zu ihrer **Obergrenze** warm werden (Standard Komfort + 1 K),
+danach zehren sie von der gespeicherten Wärme bis zur Untergrenze (in der Komfortzeit Komfort − Band, sonst der
+**Grundwert**, Standard Komfort − 2 K). Der Regler **„Wenige Brennerstarts ↔ wenig Gas“** (Optionen, Standard 80)
+gewichtet Starts gegen Blockstunden – beide pro Tag gerechnet, so dass eine längere Ladung, die eine lange Pause
+ermöglicht, sich lohnt. Optional setzt Thermocast je Zone den Sollwert von **Better Thermostat** (im Block die
+Obergrenze, sonst die Untergrenze), mit **Ruhezeiten** ohne Stellgeräusche und Respekt vor Handeingriffen.
 
 ### Beispiel-Zonen (Flächen als YAML im Feld „Sonnenbeschienene Flächen“)
 
@@ -187,7 +198,8 @@ custom_components/thermocast/
 ├── core/            reines Python + numpy (Notebook- & Test-tauglich, kein HA-Import)
 │   ├── model.py     OnlineZoneModel (RLS), Ursachen-Zerlegung
 │   ├── forecast.py  Open-Meteo, Einstrahlung je Ausrichtung
-│   ├── planner.py   Blockplaner, austauschbare Kostenfunktion (Komponenten)
+│   ├── planner.py   Blockplaner, Ober-/Untergrenze, Lade-Deckel, Kostenfunktion „Laden & Zehren“
+│   ├── bt.py        Better-Thermostat-Sollwert (rein): Laden, Untergrenze, Ruhezeit
 │   ├── rules.py     Aktor-Regeln (rein)
 │   ├── rollout.py   Regler-Rollout bis morgen 24:00
 │   ├── explain.py   Begründungs-Codes, Robustheit, Planänderung
@@ -195,6 +207,7 @@ custom_components/thermocast/
 │   └── view.py      Panel-View-Vertrag v1
 ├── coordinator.py   Sensoren → Stunden-Samples → Modell → Planer → Aktor
 ├── actuator.py      Freigabe schalten (Mindestzeiten, Budget, Fail-safe)
+├── zone_actuator.py Better-Thermostat-Sollwerte je Zone (opt-in, Handeingriffe, Ruhezeiten)
 ├── view_builder.py  Panel-Daten (Historie, Rollout, Ereignisse) – getrennt vom Regelpfad
 ├── history.py, events.py, websocket_api.py, panel.py
 ├── frontend/        Panel (Lit, ohne Build): thermocast-panel.js, tc-*.js, i18n.js, dev/

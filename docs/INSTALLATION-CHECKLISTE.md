@@ -5,7 +5,7 @@ sind typische EMS-ESP-Namen und **nur Beispiele** – in *Entwicklerwerkzeuge �
 
 ## 0. Voraussetzungen
 - [ ] Home Assistant **≥ 2026.9** (Python 3.14), Recorder aktiv (kein `include`-Filter, `purge_keep_days: 120` passt).
-- [ ] EMS-ESP liefert per MQTT: Außentemperatur, Vorlauf, Heizungspumpe, RC310-Sommer/Winter-Schwelle.
+- [ ] EMS-ESP liefert per MQTT: Außentemperatur, Vorlauf, Heizungspumpe, RC310-Sommer/Winter-Modus und -Schwelle.
 
 ## 1. Entitäten vorab prüfen
 | Zweck | Beispiel | Prüfen |
@@ -13,25 +13,36 @@ sind typische EMS-ESP-Namen und **nur Beispiele** – in *Entwicklerwerkzeuge �
 | Außentemperatur | `sensor.boiler_outside_temperature` | °C, ändert sich; Attribut `state_class: measurement` |
 | Vorlauf | `sensor.boiler_current_flow_temperature` | steigt bei Brennerbetrieb |
 | Heizungspumpe | `binary_sensor.boiler_heating_pump` | an/aus passt zum Heizbetrieb (nicht zur WW-Ladung) |
-| **Freigabe** | `number.thermostat_hc1_summer_temperature` (RC310 Sommer/Winter-Schwelle) | siehe 2. |
+| **Freigabe** | `select.thermostat_hc1_summersetmode` (RC310 Sommer/Winter-Modus) | siehe 2. |
+| Sommerschwelle | `number.thermostat_hc1_summertemp` | einmalig fest auf **10 °C** |
+| Better Thermostat (optional) | `climate.<bt_raum>` | nur für Zonen, deren Sollwert Thermocast setzen soll |
 | Raumtemperaturen | Wohnzimmer, Küche, Schlafräume | `state_class: measurement` (für Warmstart/KPIs) |
 | Ventil (TRV) | `climate.<trv>` (das Thermostat selbst, nicht Better Thermostat) | `hvac_action` wechselt zwischen `heating` und `idle`; **nicht** `valve_opening_degree` (nur eine eingestellte Grenze) |
 | Brennerstarts | `sensor.boiler_burner_starts` | `state_class: total_increasing` |
 | Heizenergie | `sensor.boiler_energy_heating` | kWh, `total_increasing` |
 | Warmwasser aktiv | `binary_sensor.boiler_dhw_charging` | an während WW-Ladung |
 
-## 2. Freigabe-Entität testen (wichtig, EEPROM!)
-- [ ] In *Entwicklerwerkzeuge → Aktionen* `number.set_value` auf **10**, dann zurück auf **16**.
+## 2. Freigabe einrichten und testen (wichtig, EEPROM!)
+
+Empfohlen: **Winter** = Heizen erlaubt, **Auto** = gesperrt, Sommerschwelle fest **10 °C**.
+- Ein Block heizt damit sicher – auch an milden Tagen (die Schwelle allein wirkt nur unterhalb ihres Werts).
+- Zwischen den Blöcken steht die Heizungspumpe (im Winterbetrieb läuft sie sonst periodisch).
+- Fällt HA aus: in „Winter“ heizt das RC310 normal weiter, in „Auto“ spätestens unter 10 °C (gedämpft).
+- Grenze: unter 10 °C kann Thermocast nicht sperren. „Sommer“ als Sperre nur mit einer Absicherung außerhalb
+  von HA (z. B. EMS-ESP-Scheduler), sonst heizt bei einem HA-Ausfall nichts mehr.
+
+- [ ] `number.thermostat_hc1_summertemp` einmalig auf **10** setzen.
+- [ ] Den Modus in *Entwicklerwerkzeuge → Aktionen* (`select.select_option`) auf **Winter**, dann **Auto** stellen.
 - [ ] Der Zustand folgt **innerhalb weniger Sekunden** – sonst stimmt die Entität nicht (Thermocast würde
       das als „nicht bestätigt“ melden und mit wachsenden Pausen erneut schreiben, max. 40×/Tag).
-- [ ] Am RC310 bzw. in EMS-ESP sichtbar, dass der Wert ankam. Danach **auf 16 lassen**.
+- [ ] Danach auf **Auto** lassen.
 
 ## 3. Installation
 - [ ] `custom_components/thermocast` nach `config/custom_components/` kopieren (später: HACS-Custom-Repo).
 - [ ] HA neu starten → *Einstellungen → Geräte & Dienste → Integration hinzufügen → Thermocast*.
-- [ ] Haus: Außentemperatur, Vorlauf, **Heizungspumpe** (empfohlen), Freigabe = RC310-Schwelle, Werte **16 / 10**.
-      Falsch gewählt (z. B. die Sommer/Winter-Auswahl statt der Schwelle)? *Thermocast → ⋮ → Rekonfigurieren* –
-      Zonen und gelernte Modelle bleiben erhalten.
+- [ ] Haus: Außentemperatur, Vorlauf, **Heizungspumpe** (empfohlen), Freigabe = Sommer/Winter-Modus,
+      „Heizen erlaubt“ = **Winter**, „gesperrt“ = **Auto**.
+      Falsch gewählt? *Thermocast → ⋮ → Rekonfigurieren* – Zonen und gelernte Modelle bleiben erhalten.
 
 ## 4. Zonen anlegen („Zone hinzufügen“)
 
@@ -53,8 +64,16 @@ Eine Zone = ein Raum oder eine Gruppe von Räumen am selben Heizkreis. Faustrege
 - **Nachbarn:** angrenzende Räume mit eigenem Sensor, besonders **Flure/Treppenhäuser** (offene Treppen und
   Türen koppeln stark). Ein Sensor im Treppenhaus ist oft der wertvollste im ganzen Haus.
 - **Komfort:** festes Zeitfenster oder ein **Zeitplan-Helfer** (`schedule.*`, z. B. Büro werktags, Bad
-  morgens + abends). Schlafräume mit lauten TRVs: nur **vor** der Schlafenszeit führen lassen und in Better
-  Thermostat nachts einen Sollwert unter der Raumtemperatur setzen – Thermocast stellt TRVs nie selbst.
+  morgens + abends).
+- **Laden & Zehren:** *Obergrenze* (bis hierher darf ein Block die Zone aufwärmen, Standard Komfort + 1 K) und
+  *Grundwert* (Untergrenze außerhalb der Komfortzeit, Standard Komfort − 2 K). Je weiter das Band, desto
+  längere Pausen und weniger Brennerstarts.
+- **Better Thermostat steuern (optional, je Zone):** Thermocast setzt den BT-Sollwert – im Block die
+  Obergrenze, sonst die Untergrenze. Die TRVs selbst stellt weiter nur BT. **BT-Zeitpläne/Automationen für
+  diese Räume deaktivieren**, sonst regeln zwei Stellen gegeneinander. Von Hand verstellt? Thermocast lässt
+  den Raum bis zum Blockende (mindestens 3 h) in Ruhe.
+- **Ruhezeit** (z. B. Kinderzimmer 19–07 Uhr): 15 min vorher einmal Grundwert, danach keine Änderung mehr
+  (keine Stellgeräusche). Ausnahme: eine führende Zone fällt mehr als 1 K unter den Grundwert.
 - **Zonen, die ihr Ziel evtl. nicht erreichen** (z. B. Bad an einem FBH-Kreis mit Rücklaufbegrenzer):
   zuerst **nicht führend** anlegen und im Panel beobachten – eine führende Zone, die ihr Ziel nie erreicht,
   hält den Kessel dauerhaft frei.
@@ -65,6 +84,8 @@ Eine Zone = ein Raum oder eine Gruppe von Räumen am selben Heizkreis. Faustrege
 - [ ] Brennerstarts, Heizenergie, Warmwasser aktiv eintragen.
 - [ ] „Unsicherheit kalibrieren“ an lassen (Standard).
 - [ ] Mindestblock 3 h, Mindestpause 2 h, max. 12 Wechsel/Tag sind gute Startwerte.
+- [ ] „Wenige Brennerstarts ↔ wenig Gas“: Standard 80 (wenige lange Blöcke). Wirkung im KPI-Tab ablesen.
+- [ ] Sicherheitsabstand σ: 1 = vorsichtig, 0 = nur der Mittelwert der Prognose.
 
 ## 6. Plausibilität (Panel → Tab „Modell“)
 - [ ] Modellfehler (Hindcast) je Zone **< 0,3 K** – größer: Sensoren/Flächen prüfen.
@@ -81,9 +102,12 @@ Eine Zone = ein Raum oder eine Gruppe von Räumen am selben Heizkreis. Faustrege
 - [ ] `switch.thermocast_steuerung_aktiv` an. Ereignisse „Steuerung eingeschaltet“, „Freigabe geschrieben“.
 - [ ] Erste Tage: keine Meldung „Freigabe nicht bestätigt“, Wechsel/Tag im Budget, Räume im Komfortband.
 - [ ] Tab „KPIs“: Brennerstarts/Tag und kWh/Heizgradtag **vorher vs. seit Steuerung**.
+- [ ] Tageskarten: „Brennerstarts … je Block“ – mehr als ~2 je Block heißt, dass der Brenner im Block taktet
+      (Wärmeabnahme zu gering) → Obergrenze/BT-Steuerung prüfen.
 
 ## 9. Notfall / Rückweg
-- Schalter „Steuerung aktiv“ **aus** → Freigabe sofort auf 16 (Heizen erlaubt).
-- Integration entfernen/deaktivieren → ebenfalls 16.
-- Fällt HA aus, während 10 gesetzt ist: das RC310 heizt bei Kälte (< 10 °C gedämpft) von selbst.
+- Schalter „Steuerung aktiv“ **aus** → Freigabe sofort auf „Heizen erlaubt“, BT-Zonen auf ihre Untergrenze.
+- Integration entfernen/deaktivieren → ebenso.
+- Fällt HA aus, während „gesperrt“ gesetzt ist: das RC310 heizt bei Kälte (< 10 °C gedämpft) von selbst.
+  Better Thermostat läuft in HA – die TRVs behalten dann ihren letzten Sollwert.
 - *Diagnose herunterladen* (⋮ an der Integration) liefert alle Modelle, Logs und Ereignisse für die Analyse.
