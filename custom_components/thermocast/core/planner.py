@@ -44,6 +44,12 @@ class ZonePlanInput:
     def capped(self) -> bool:
         return any(c is not None for c in self.charge_cap)
 
+    def closed_hours(self, cand: Candidate, recs: list[HourRecord]) -> int:
+        """Block hours in which this zone's thermostat holds the valve shut (the room is at its cap)."""
+        if not self.capped:
+            return 0
+        return sum(1 for i, rec in enumerate(recs) if cand.active(i) and self.cap_at(i) is not None and rec.q == 0.0)
+
     def heating_records(self, cand: Candidate) -> list[HourRecord]:
         """Forecast inputs with the block's heating; capped hours (room at its cap) get no heat."""
         return self.heating_prediction(cand)[0]
@@ -101,13 +107,17 @@ class PlanResult:
         return self.best.active(0)
 
 
-# (candidate, K·h too cold, K·h too warm, coast hours after the block until the next block is needed)
-CostFn = Callable[[Candidate, float, float, float], dict[str, float]]
+# (candidate, K·h too cold, K·h too warm, coast hours after the block until the next block is needed,
+#  block hours with the thermostat-controlled rooms closed – as a share of those rooms)
+CostFn = Callable[[Candidate, float, float, float, float], dict[str, float]]
 MIN_COAST_H = 2  # a "next block" sooner than this is no real pause – its violations stay with this candidate
+# with few open radiators the boiler only fires briefly and waits out its anti-cycling lock (≈ 45 min)
+CYCLE_STARTS_PER_H = 60.0 / 45.0
 
 
 def default_cost(
-    candidate: Candidate, comfort_violation: float, overheat: float = 0.0, coast_h: float = 0.0
+    candidate: Candidate, comfort_violation: float, overheat: float = 0.0, coast_h: float = 0.0,
+    closed_h: float = 0.0,
 ) -> dict[str, float]:
     """Gas boiler: comfort first, then few starts, then little energy (ignores upper bound and coast)."""
     parts = {"comfort": 20.0 * comfort_violation, "start": 0.0, "energy": 0.0, "delay": 0.0}
@@ -123,17 +133,22 @@ def charge_cost(weight: float) -> CostFn:
 
     A start costs 1…10, a block hour 0.5…0.15 – both **per day**: scaled by 24 h / (block + coast), so a
     block that stores enough heat for a long pause pays for itself. Staying below the lower bound costs
-    20 per K·h (leading zones), going above the upper bound 4 per K·h (all zones). Marked with
-    ``coast = True``: the planner leaves violations after the coast to the next block.
+    20 per K·h (leading zones), going above the upper bound 4 per K·h (all zones). Block hours in which the
+    thermostat-controlled rooms are closed (at their cap, e.g. in quiet time) cost extra burner starts: few
+    consumers make the boiler cycle inside the block. Marked with ``coast = True``: the planner leaves
+    violations after the coast to the next block.
     """
     w = min(1.0, max(0.0, weight))
 
-    def cost(candidate: Candidate, comfort_violation: float, overheat: float, coast_h: float) -> dict[str, float]:
-        parts = {"comfort": 20.0 * comfort_violation, "overheat": 4.0 * overheat, "start": 0.0, "energy": 0.0,
-                 "delay": 0.0}
+    def cost(
+        candidate: Candidate, comfort_violation: float, overheat: float, coast_h: float, closed_h: float = 0.0
+    ) -> dict[str, float]:
+        parts = {"comfort": 20.0 * comfort_violation, "overheat": 4.0 * overheat, "start": 0.0, "cycling": 0.0,
+                 "energy": 0.0, "delay": 0.0}
         if candidate.start is not None:
             per_day = 24.0 / max(1.0, candidate.length + coast_h)
             parts["start"] = 0.0 if candidate.continues else (1.0 + 9.0 * w) * per_day
+            parts["cycling"] = (1.0 + 9.0 * w) * per_day * CYCLE_STARTS_PER_H * closed_h
             parts["energy"] = (0.5 - 0.35 * w) * candidate.length * per_day
             parts["delay"] = 0.01 * candidate.start
         return parts
@@ -212,6 +227,10 @@ def plan(
     # (other rooms are limited by their own thermostats)
     bounded = [zz for zz in zones if (zz.leads_release or zz.capped) and any(h is not None for h in zz.comfort_high)]
     scored_zones = leading + [zz for zz in bounded if not zz.leads_release]
+    consumers = [zz for zz in zones if zz.capped]  # rooms whose thermostat the planner sets
+    scored_names = {zz.name for zz in scored_zones}
+    scored_zones += [zz for zz in consumers if zz.name not in scored_names]
+    bounded_names = {zz.name for zz in bounded}
     horizon = min((len(zz.future) for zz in zones), default=0)
 
     free = {zz.name: zz.predict(zz.future) for zz in zones}
@@ -245,17 +264,23 @@ def plan(
     for cand in candidates:
         preds: dict[str, Prediction] = {}
         viol: list[tuple[int, float]] = []
-        overheat = 0.0
+        overheat = closed = 0.0
         for zz in scored_zones:
-            pred = free[zz.name] if cand.start is None else zz.heating_prediction(cand)[1]
+            if cand.start is None:
+                pred = free[zz.name]
+            else:
+                recs, pred = zz.heating_prediction(cand)
+                if zz.capped:
+                    closed += zz.closed_hours(cand, recs) / len(consumers)
             if zz.leads_release:
                 preds[zz.name] = pred
                 viol += violations(pred, zz.comfort_low, z)
-            overheat += overheat_kh(pred, zz.comfort_high)
+            if zz.name in bounded_names:
+                overheat += overheat_kh(pred, zz.comfort_high)
         violation, coast = _counted(viol, cand, horizon, coast_mode)
         if coast_mode and cand.start is not None and not any(i >= cand.start + cand.length for i, _ in viol):
             coast += _coast_beyond(preds, leading, z)  # no next block needed inside the horizon
-        parts = cost_fn(cand, violation, overheat, coast)
+        parts = cost_fn(cand, violation, overheat, coast, closed)
         scored_all.append(ScoredCandidate(cand, sum(parts.values()), parts, violation, preds))
 
     ranked = sorted(scored_all, key=lambda s: s.cost)  # stable: ties keep search order

@@ -121,6 +121,9 @@ Live und im Rollout: `charge_cost(w)` („Laden & Zehren“, Spec `docs/superpow
   Ohne das sah der Ein-Block-Planer den nächsten Start nie, und der Regler wirkte nicht.
 - Läuft ein Block schon (`running`), kostet Weiterheizen keinen Start (sonst bricht die Neuplanung Blöcke ab).
 - BT-gesteuerte Zonen sind gedeckelt (`charge_cap`): q = 0, sobald die Zone ihre Obergrenze (Ruhezeit: Grundwert) erreicht.
+- **Wenig Abnehmer** (`cycling`): Blockstunden, in denen BT-Räume zu sind (Anteil an allen BT-Räumen), kosten
+  `(1+9w)·24/(Länge+Zehrzeit)·60/45` je Stunde – mit wenigen offenen Kreisen taktet der Brenner im Block
+  (Taktsperre 45 min). Legt Blöcke in Stunden, in denen viele Räume Wärme nehmen (z. B. vor einer Ruhezeit).
 `default_cost` (alt, ohne Obergrenze/Zehrzeit) bleibt für Tests/Vergleich. Die Kostenfunktion ist injizierbar –
 für die Wärmepumpe später COP(T_out, Vorlauf), Strompreis, PV-Überschuss.
 

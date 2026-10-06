@@ -18,6 +18,7 @@ class TcDetails extends LitElement {
     const rows = this.view.candidates;
     if (!rows.length) return nothing;
     const overheat = rows.some((c) => "overheat" in c.parts);
+    const cycling = rows.some((c) => (c.parts.cycling ?? 0) > 0);
     return html`<div class="card">
       <h3>${t(L, "candidates")}</h3>
       <div class="scroll">
@@ -29,6 +30,7 @@ class TcDetails extends LitElement {
               <th>${t(L, "c_comfort")}</th>
               ${overheat ? html`<th>${t(L, "c_overheat")}</th>` : nothing}
               <th>${t(L, "c_start")}</th>
+              ${cycling ? html`<th title=${t(L, "c_cycling_hint")}>${t(L, "c_cycling")}</th>` : nothing}
               <th>${t(L, "c_energy")}</th>
               <th>${t(L, "c_delay")}</th>
               <th>${t(L, "c_total")}</th>
@@ -47,6 +49,7 @@ class TcDetails extends LitElement {
                   <td>${fmtNum(c.parts.comfort ?? 0, L, 2)}</td>
                   ${overheat ? html`<td>${fmtNum(c.parts.overheat ?? 0, L, 2)}</td>` : nothing}
                   <td>${fmtNum(c.parts.start ?? 0, L, 2)}</td>
+                  ${cycling ? html`<td>${fmtNum(c.parts.cycling ?? 0, L, 2)}</td>` : nothing}
                   <td>${fmtNum(c.parts.energy ?? 0, L, 2)}</td>
                   <td>${fmtNum(c.parts.delay ?? 0, L, 2)}</td>
                   <td><b>${fmtNum(c.cost, L, 2)}</b></td>

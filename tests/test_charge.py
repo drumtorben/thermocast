@@ -7,7 +7,7 @@ from functools import lru_cache
 from .core_helpers import SPEC, future, record, trained_model
 from .synthetic import simulate
 from core.model import OnlineZoneModel, ZoneSpec
-from core.planner import Candidate, ZonePlanInput, charge_cost, default_cost, plan
+from core.planner import CYCLE_STARTS_PER_H, Candidate, ZonePlanInput, charge_cost, default_cost, plan
 from core.rollout import ActuatorState, rollout
 from core.rules import Rules
 
@@ -67,9 +67,54 @@ def test_charge_cost_parts():
     half = charge_cost(0.8)(Candidate(1, 4), 0.0, 0.0, 8.0)  # 12 h cycle = two starts per day
     assert abs(half["start"] - 16.4) < 1e-9
     assert charge_cost(0.0)(Candidate(None), 0.0, 0.0, 0.0) == {
-        "comfort": 0.0, "overheat": 0.0, "start": 0.0, "energy": 0.0, "delay": 0.0,
+        "comfort": 0.0, "overheat": 0.0, "start": 0.0, "cycling": 0.0, "energy": 0.0, "delay": 0.0,
     }
     assert default_cost(Candidate(1, 4), 0.5, 0.25, 9.0) == default_cost(Candidate(1, 4), 0.5)  # ignores both
+
+
+def test_charge_cost_prices_closed_consumers_as_extra_starts():
+    # one block hour with every thermostat-controlled room closed ≈ 60/45 extra burner starts (Taktsperre)
+    parts = charge_cost(0.8)(Candidate(1, 4), 0.0, 0.0, 20.0, 1.5)  # per_day = 1
+    assert abs(parts["cycling"] - 8.2 * CYCLE_STARTS_PER_H * 1.5) < 1e-9
+    assert charge_cost(0.8)(Candidate(1, 4), 0.0, 0.0, 20.0)["cycling"] == 0.0
+    assert charge_cost(0.8)(Candidate(None), 0.0, 0.0, 0.0, 0.0)["cycling"] == 0.0
+    assert default_cost(Candidate(1, 4), 0.5, 0.25, 9.0, 2.0) == default_cost(Candidate(1, 4), 0.5)
+
+
+def test_closed_hours_count_block_hours_with_the_valve_shut():
+    z = _zone(radiator=True, cap=21.0)
+    block = Candidate(0, 6)
+    recs = z.heating_records(block)
+    closed = sum(1 for i, r in enumerate(recs) if block.active(i) and r.q == 0.0)
+    assert z.closed_hours(block, recs) == closed
+    warm = _zone(radiator=True, cap=19.0, temp=20.4)  # already above its cap: closed the whole block
+    assert warm.closed_hours(block, warm.heating_records(block)) == 6
+    assert _zone().closed_hours(block, _zone().heating_records(block)) == 0  # no thermostat control
+
+
+def test_planner_prefers_hours_when_the_consumers_are_open():
+    """Two equally good blocks: the one while the radiator room may still take heat wins (fewer burner cycles)."""
+    lead = _zone(t_out=3.0, temp=20.3, hours=24)
+    lead = type(lead)(**{**lead.__dict__, "comfort_low": [None] * 12 + [20.0] * 12})
+    room = _zone(t_out=3.0, temp=20.0, hours=24, radiator=True)
+    quiet_late = [22.0] * 6 + [15.0] * 18  # quiet time from hour 6: valve held at the (low) base temperature
+    room = type(room)(**{**room.__dict__, "name": "room", "leads_release": False, "comfort_low": [None] * 24,
+                         "charge_cap": quiet_late})
+    res = plan([lead, room], block_lengths=(3,), cost_fn=charge_cost(0.8), z=0.0)
+    early = next(s for s in res.ranked if s.candidate.start == 2)
+    late = next(s for s in res.ranked if s.candidate.start == 8)
+    assert late.parts["cycling"] > early.parts["cycling"]
+
+
+def test_closed_consumers_never_outweigh_a_real_comfort_need():
+    """Cold night, every radiator room in quiet time: the screed still gets its block."""
+    lead = _zone(t_out=-5.0, temp=20.1, hours=24)
+    room = _zone(t_out=-5.0, temp=20.0, hours=24, radiator=True)
+    room = type(room)(**{**room.__dict__, "name": "room", "leads_release": False, "comfort_low": [None] * 24,
+                         "charge_cap": [15.0] * 24})
+    res = plan([lead, room], cost_fn=charge_cost(0.8), z=0.0)
+    assert res.best.start is not None
+    assert res.ranked[0].parts["cycling"] > 0  # the closed room is priced in, but comfort wins
 
 
 def test_coast_leaves_later_violations_to_the_next_block():

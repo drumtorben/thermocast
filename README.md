@@ -79,7 +79,8 @@ Blöcke: während eines Blocks dürfen die Zonen bis zu ihrer **Obergrenze** war
 danach zehren sie von der gespeicherten Wärme bis zur Untergrenze (in der Komfortzeit Komfort − Band, sonst der
 **Grundwert**, Standard Komfort − 2 K). Der Regler **„Wenige Brennerstarts ↔ wenig Gas“** (Optionen, Standard 80)
 gewichtet Starts gegen Blockstunden – beide pro Tag gerechnet, so dass eine längere Ladung, die eine lange Pause
-ermöglicht, sich lohnt. Optional setzt Thermocast je Zone den Sollwert von **Better Thermostat** (im Block die
+ermöglicht, sich lohnt. Stunden, in denen die Thermostat-Räume zu sind (an ihrer Grenze oder in der Ruhezeit),
+zählen als zusätzliche Starts – Blöcke landen bevorzugt dort, wo viele Räume gleichzeitig Wärme abnehmen. Optional setzt Thermocast je Zone den Sollwert von **Better Thermostat** (im Block die
 Obergrenze, sonst die Untergrenze), mit **Ruhezeiten** ohne Stellgeräusche und Respekt vor Handeingriffen.
 
 ### Beispiel-Zonen (Flächen als YAML im Feld „Sonnenbeschienene Flächen“)
