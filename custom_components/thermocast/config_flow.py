@@ -44,6 +44,7 @@ from .const import (
     CONF_NEIGHBOR_SENSORS,
     CONF_OUTDOOR_SENSOR,
     CONF_QUIET_FROM,
+    CONF_QUIET_SCHEDULE,
     CONF_QUIET_TO,
     CONF_RELEASE_ENTITY,
     CONF_RELEASE_OFF,
@@ -162,6 +163,7 @@ def _zone_schema() -> vol.Schema:
             vol.Optional(CONF_BT_ENTITY): selector.EntitySelector(selector.EntitySelectorConfig(domain="climate")),
             vol.Optional(CONF_QUIET_FROM): selector.TimeSelector(),
             vol.Optional(CONF_QUIET_TO): selector.TimeSelector(),
+            vol.Optional(CONF_QUIET_SCHEDULE): selector.EntitySelector(selector.EntitySelectorConfig(domain="schedule")),
             vol.Optional(CONF_SURFACES, default=[]): selector.ObjectSelector(),
             vol.Optional(CONF_NEIGHBOR_SENSORS, default=[]): _temp_sensor(multiple=True),
             vol.Optional(CONF_GAIN_ENTITIES, default=[]): selector.EntitySelector(

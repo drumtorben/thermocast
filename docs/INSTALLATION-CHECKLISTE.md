@@ -74,6 +74,8 @@ Eine Zone = ein Raum oder eine Gruppe von Räumen am selben Heizkreis. Faustrege
   den Raum bis zum Blockende (mindestens 3 h) in Ruhe.
 - **Ruhezeit** (z. B. Kinderzimmer 19–07 Uhr): 15 min vorher einmal Grundwert, danach keine Änderung mehr
   (keine Stellgeräusche). Ausnahme: eine führende Zone fällt mehr als 1 K unter den Grundwert.
+  Mehrere Ruhefenster (z. B. Mittagsschlaf + Nacht, je Wochentag): einen **Zeitplan-Helfer** als
+  „Ruhezeit-Zeitplan“ wählen – Ruhe gilt, wenn Zeitplan **oder** Von/Bis aktiv ist.
 - **Zonen, die ihr Ziel evtl. nicht erreichen** (z. B. Bad an einem FBH-Kreis mit Rücklaufbegrenzer):
   zuerst **nicht führend** anlegen und im Panel beobachten – eine führende Zone, die ihr Ziel nie erreicht,
   hält den Kessel dauerhaft frei.

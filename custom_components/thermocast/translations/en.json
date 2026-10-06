@@ -77,7 +77,8 @@
             "bt_control": "Control the Better Thermostat target",
             "bt_entity": "Better Thermostat entity",
             "quiet_from": "Quiet time from",
-            "quiet_to": "Quiet time until"
+            "quiet_to": "Quiet time until",
+            "quiet_schedule": "Quiet-time schedule (optional)"
           },
           "data_description": {
             "surfaces": "YAML list, e.g. [{kind: window, azimuth: 90, tilt: 90}, {kind: roof, azimuth: 180, tilt: 40}]. Azimuth: 0=N, 90=E, 180=S, 270=W.",
@@ -90,7 +91,8 @@
             "base_temp": "Lowest temperature outside the comfort time (night, office closed). Default: comfort − 2 K.",
             "bt_control": "Thermocast sets the target of this room's Better Thermostat: upper bound during a block, otherwise the lower bound. Disable Better Thermostat schedules/automations for this room.",
             "bt_entity": "The climate entity of Better Thermostat (not the TRV itself).",
-            "quiet_from": "No thermostat changes (valve noise) during the quiet time; 15 min before it starts the target is set to the base temperature."
+            "quiet_from": "No thermostat changes (valve noise) during the quiet time; 15 min before it starts the target is set to the base temperature.",
+            "quiet_schedule": "A schedule helper for more quiet windows, e.g. nap 12:30–14:30 and night 19–07, also per weekday. Quiet when this schedule OR the from/until window is on."
           }
         },
         "reconfigure": {
@@ -115,7 +117,8 @@
             "bt_control": "Control the Better Thermostat target",
             "bt_entity": "Better Thermostat entity",
             "quiet_from": "Quiet time from",
-            "quiet_to": "Quiet time until"
+            "quiet_to": "Quiet time until",
+            "quiet_schedule": "Quiet-time schedule (optional)"
           },
           "data_description": {
             "surfaces": "YAML list, e.g. [{kind: window, azimuth: 90, tilt: 90}, {kind: roof, azimuth: 180, tilt: 40}]. Azimuth: 0=N, 90=E, 180=S, 270=W.",
@@ -128,7 +131,8 @@
             "base_temp": "Lowest temperature outside the comfort time (night, office closed). Default: comfort − 2 K.",
             "bt_control": "Thermocast sets the target of this room's Better Thermostat: upper bound during a block, otherwise the lower bound. Disable Better Thermostat schedules/automations for this room.",
             "bt_entity": "The climate entity of Better Thermostat (not the TRV itself).",
-            "quiet_from": "No thermostat changes (valve noise) during the quiet time; 15 min before it starts the target is set to the base temperature."
+            "quiet_from": "No thermostat changes (valve noise) during the quiet time; 15 min before it starts the target is set to the base temperature.",
+            "quiet_schedule": "A schedule helper for more quiet windows, e.g. nap 12:30–14:30 and night 19–07, also per weekday. Quiet when this schedule OR the from/until window is on."
           }
         }
       },

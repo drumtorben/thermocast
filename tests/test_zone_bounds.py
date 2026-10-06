@@ -62,6 +62,16 @@ async def test_quiet_hours_over_midnight(hass: HomeAssistant) -> None:
     assert zone_charge_cap(z, _local(hass, 23)) == 17.0  # quiet: the thermostat stays at the floor
 
 
+async def test_quiet_from_schedule_plan_and_window(hass: HomeAssistant) -> None:
+    """Quiet when the fixed window OR the schedule says so; the 15-min lead also looks into the schedule."""
+    z = _z(**{CONF_QUIET_FROM: "19:00:00", CONF_QUIET_TO: "07:00:00"})
+    z.quiet_plan = {d: [{"from": "12:30:00", "to": "14:30:00"}] for d in
+                    ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")}
+    assert zone_quiet(z, _local(hass, 13)) and zone_quiet(z, _local(hass, 23))
+    assert not zone_quiet(z, _local(hass, 15)) and not zone_quiet(z, _local(hass, 12, 20))
+    assert zone_quiet(z, _local(hass, 12, 20), lead=timedelta(minutes=15))
+
+
 async def test_zone_flow_new_fields_and_validation(
     hass: HomeAssistant, mock_entry: MockConfigEntry, mock_open_meteo
 ) -> None:

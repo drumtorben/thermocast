@@ -77,7 +77,8 @@
             "bt_control": "Better-Thermostat-Sollwert steuern",
             "bt_entity": "Better-Thermostat-Entität",
             "quiet_from": "Ruhezeit von",
-            "quiet_to": "Ruhezeit bis"
+            "quiet_to": "Ruhezeit bis",
+            "quiet_schedule": "Ruhezeit-Zeitplan (optional)"
           },
           "data_description": {
             "surfaces": "YAML-Liste, z. B. [{kind: window, azimuth: 90, tilt: 90}, {kind: roof, azimuth: 180, tilt: 40}]. Azimut: 0=N, 90=O, 180=S, 270=W.",
@@ -90,7 +91,8 @@
             "base_temp": "Niedrigste Temperatur außerhalb der Komfortzeit (Nacht, Büro zu). Standard: Komfort − 2 K.",
             "bt_control": "Thermocast setzt den Sollwert des Better Thermostats dieses Raums: im Block die Obergrenze, sonst die Untergrenze. Better-Thermostat-Zeitpläne/Automationen für diesen Raum deaktivieren.",
             "bt_entity": "Die climate-Entität von Better Thermostat (nicht der TRV selbst).",
-            "quiet_from": "In der Ruhezeit keine Thermostat-Änderungen (Stellgeräusche); 15 min vorher wird einmal der Grundwert gesetzt."
+            "quiet_from": "In der Ruhezeit keine Thermostat-Änderungen (Stellgeräusche); 15 min vorher wird einmal der Grundwert gesetzt.",
+            "quiet_schedule": "Ein Zeitplan-Helfer für weitere Ruhefenster, z. B. Mittagsschlaf 12:30–14:30 und Nacht 19–07, auch je Wochentag. Ruhe, wenn dieser Zeitplan ODER das Von/Bis-Fenster aktiv ist."
           }
         },
         "reconfigure": {
@@ -115,7 +117,8 @@
             "bt_control": "Better-Thermostat-Sollwert steuern",
             "bt_entity": "Better-Thermostat-Entität",
             "quiet_from": "Ruhezeit von",
-            "quiet_to": "Ruhezeit bis"
+            "quiet_to": "Ruhezeit bis",
+            "quiet_schedule": "Ruhezeit-Zeitplan (optional)"
           },
           "data_description": {
             "surfaces": "YAML-Liste, z. B. [{kind: window, azimuth: 90, tilt: 90}, {kind: roof, azimuth: 180, tilt: 40}]. Azimut: 0=N, 90=O, 180=S, 270=W.",
@@ -128,7 +131,8 @@
             "base_temp": "Niedrigste Temperatur außerhalb der Komfortzeit (Nacht, Büro zu). Standard: Komfort − 2 K.",
             "bt_control": "Thermocast setzt den Sollwert des Better Thermostats dieses Raums: im Block die Obergrenze, sonst die Untergrenze. Better-Thermostat-Zeitpläne/Automationen für diesen Raum deaktivieren.",
             "bt_entity": "Die climate-Entität von Better Thermostat (nicht der TRV selbst).",
-            "quiet_from": "In der Ruhezeit keine Thermostat-Änderungen (Stellgeräusche); 15 min vorher wird einmal der Grundwert gesetzt."
+            "quiet_from": "In der Ruhezeit keine Thermostat-Änderungen (Stellgeräusche); 15 min vorher wird einmal der Grundwert gesetzt.",
+            "quiet_schedule": "Ein Zeitplan-Helfer für weitere Ruhefenster, z. B. Mittagsschlaf 12:30–14:30 und Nacht 19–07, auch je Wochentag. Ruhe, wenn dieser Zeitplan ODER das Von/Bis-Fenster aktiv ist."
           }
         }
       },

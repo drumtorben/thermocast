@@ -62,6 +62,7 @@ CONF_BT_CONTROL = "bt_control"  # Thermocast sets the Better Thermostat target o
 CONF_BT_ENTITY = "bt_entity"  # the Better Thermostat climate entity
 CONF_QUIET_FROM = "quiet_from"  # no thermostat writes (valve noise) from …
 CONF_QUIET_TO = "quiet_to"  # … until
+CONF_QUIET_SCHEDULE = "quiet_schedule"  # optional schedule.* entity: more quiet windows (nap + night, weekdays)
 DEFAULT_HIGH_OFFSET = 1.0  # K above comfort
 DEFAULT_BASE_OFFSET = 2.0  # K below comfort
 QUIET_LEAD = timedelta(minutes=15)  # set the floor this long before the quiet time starts

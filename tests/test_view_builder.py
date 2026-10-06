@@ -68,6 +68,31 @@ async def test_view_error_does_not_touch_control(hass: HomeAssistant, mock_entry
 
 
 @pytest.mark.parametrize("expected_lingering_timers", [True])  # the schedule helper keeps its own timer
+async def test_quiet_time_from_schedule_with_two_windows(hass: HomeAssistant, mock_entry, mock_open_meteo) -> None:
+    """Nap and night: two quiet windows per day from a schedule helper."""
+    from homeassistant.setup import async_setup_component
+    from homeassistant.util import dt as dt_util
+
+    from custom_components.thermocast.const import CONF_QUIET_SCHEDULE
+
+    days = {d: [{"from": "00:00:00", "to": "07:00:00"}, {"from": "12:30:00", "to": "14:30:00"},
+                {"from": "19:00:00", "to": "24:00:00"}]
+            for d in ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")}
+    assert await async_setup_component(hass, "schedule", {"schedule": {"kids_quiet": {"name": "Ruhe", **days}}})
+    sub = next(iter(mock_entry.subentries.values()))
+    mock_entry.add_to_hass(hass)
+    hass.config_entries.async_update_subentry(mock_entry, sub, data={**sub.data, CONF_QUIET_SCHEDULE: "schedule.kids_quiet"})
+    await _setup_states(hass)
+    await _setup_entry(hass, mock_entry)
+
+    zone = mock_entry.runtime_data.view["zones"][0]
+    tz = dt_util.get_time_zone(hass.config.time_zone)
+    for iso, quiet in zip(mock_entry.runtime_data.view["hours"], zone["quiet"]):
+        h = datetime.fromisoformat(iso).astimezone(tz).hour
+        assert quiet == (h < 7 or h in (13, 14) or h >= 19), (iso, quiet)  # checked at the hour start
+
+
+@pytest.mark.parametrize("expected_lingering_timers", [True])  # the schedule helper keeps its own timer
 async def test_comfort_from_schedule(hass: HomeAssistant, mock_entry, mock_open_meteo) -> None:
     from homeassistant.setup import async_setup_component
     from homeassistant.util import dt as dt_util

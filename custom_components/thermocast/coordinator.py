@@ -41,6 +41,7 @@ from .const import (
     CONF_NEIGHBOR_SENSORS,
     CONF_OUTDOOR_SENSOR,
     CONF_QUIET_FROM,
+    CONF_QUIET_SCHEDULE,
     CONF_QUIET_TO,
     CONF_STARTS_WEIGHT,
     CONF_SURFACES,
@@ -150,6 +151,7 @@ class ZoneRuntime:
     params: list[dict[str, Any]] = field(default_factory=list)  # daily parameter snapshots
     std_scale: tuple[float, ...] = ()  # calibrated σ factor per hour ahead (from the forecast log)
     schedule_plan: dict[str, list[dict[str, Any]]] | None = None  # weekly plan of the comfort schedule
+    quiet_plan: dict[str, list[dict[str, Any]]] | None = None  # weekly plan of the quiet-time schedule
 
     def reset_acc(self) -> None:
         self.acc = {"t_out": [], "q": [], "neighbors": [], "gains": [], "window": []}
@@ -233,11 +235,13 @@ def zone_floor(z: ZoneRuntime, when: datetime) -> float:
 
 
 def zone_quiet(z: ZoneRuntime, when: datetime, lead: timedelta = timedelta(0)) -> bool:
-    """Inside the zone's quiet time (no thermostat writes); ``lead`` looks ahead (set the floor in time)."""
+    """Inside the zone's quiet time (no thermostat writes): the from/until window or the quiet schedule
+    (e.g. nap + night); ``lead`` looks ahead (set the floor in time)."""
+    local = dt_util.as_local(when + lead)
     start, end = z.cfg.get(CONF_QUIET_FROM), z.cfg.get(CONF_QUIET_TO)
-    if not start or not end:
-        return False
-    return _in_window(dt_util.as_local(when + lead), _parse_time(start), _parse_time(end))
+    if start and end and _in_window(local, _parse_time(start), _parse_time(end)):
+        return True
+    return z.quiet_plan is not None and _in_schedule(local, z.quiet_plan)
 
 
 def zone_charge_cap(z: ZoneRuntime, when: datetime) -> float | None:
@@ -643,8 +647,11 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
         self._recalibrate(z)
 
     async def _ensure_schedules(self, hour: datetime) -> None:
-        """Read the weekly plans of the comfort schedules once per hour (they rarely change)."""
-        ids = sorted({z.cfg[CONF_COMFORT_SCHEDULE] for z in self.zones.values() if z.cfg.get(CONF_COMFORT_SCHEDULE)})
+        """Read the weekly plans of the comfort and quiet schedules once per hour (they rarely change)."""
+        ids = sorted({
+            z.cfg[key] for z in self.zones.values() for key in (CONF_COMFORT_SCHEDULE, CONF_QUIET_SCHEDULE)
+            if z.cfg.get(key)
+        })
         if not ids or self._schedules_hour == hour:
             return
         self._schedules_hour = hour
@@ -658,6 +665,8 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
         for z in self.zones.values():
             eid = z.cfg.get(CONF_COMFORT_SCHEDULE)
             z.schedule_plan = plans.get(eid) if eid else None
+            quiet = z.cfg.get(CONF_QUIET_SCHEDULE)
+            z.quiet_plan = plans.get(quiet) if quiet else None
 
     async def _ensure_forecast(self, now: datetime) -> None:
         if self.forecast and self.forecast.fetched_at and now - self.forecast.fetched_at < FORECAST_MAX_AGE:
