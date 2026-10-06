@@ -54,6 +54,14 @@ class ZoneViewInput:
     group_labels: dict[str, str]  # group key -> display name (surfaces, neighbours, gains)
     contrib_past: list[dict[str, float] | None] = field(default_factory=list)  # hindcast causes, aligned
     forecast6: list[float | None] = field(default_factory=list)  # prediction made 6 h earlier, aligned
+    # charge and coast (all aligned to the window hours; empty = not available)
+    comfort_high: list[float | None] = field(default_factory=list)  # upper bound
+    floor: list[float | None] = field(default_factory=list)  # effective lower bound (comfort or base)
+    quiet: list[bool] = field(default_factory=list)  # quiet time (no thermostat writes)
+    bt_control: bool = False
+    bt_on: list[float | None] = field(default_factory=list)  # thermostat target if a block runs in that hour
+    bt_off: list[float | None] = field(default_factory=list)  # … otherwise
+    bt_past: list[float | None] = field(default_factory=list)  # recorded thermostat target
 
 
 @dataclass
@@ -105,7 +113,26 @@ def _group_kind(key: str) -> str:
     return key.split(":", 1)[0]
 
 
-def _zone_view(zi: ZoneViewInput, outlook: Outlook | None, n: int, now: int) -> dict[str, Any]:
+def _at(values: list, i: int):
+    return values[i] if i < len(values) else None
+
+
+def _bt_target(zi: ZoneViewInput, on_plan: list[bool | None], n: int, now: int) -> list[float | None]:
+    """Past: the recorded thermostat target; from now on: what Thermocast sets with the planned blocks."""
+    if not zi.bt_control:
+        return [None] * n
+    out: list[float | None] = []
+    for i in range(n):
+        if i < now:
+            out.append(_r(_at(zi.bt_past, i), 1))
+        else:
+            out.append(_r(_at(zi.bt_on, i) if on_plan[i] else _at(zi.bt_off, i), 1))
+    return out
+
+
+def _zone_view(
+    zi: ZoneViewInput, outlook: Outlook | None, n: int, now: int, on_plan: list[bool | None] | None = None
+) -> dict[str, Any]:
     plan_mean: list[float | None] = [None] * n
     plan_std: list[float | None] = [None] * n
     free_mean: list[float | None] = [None] * n
@@ -142,6 +169,11 @@ def _zone_view(zi: ZoneViewInput, outlook: Outlook | None, n: int, now: int) -> 
         "forecast6": [_r(v) for v in zi.forecast6] if zi.forecast6 else [None] * n,
         "contrib": contrib,
         "groups": [{"key": k, "label": zi.group_labels.get(k, k), "kind": _group_kind(k)} for k in keys],
+        "comfort_high": [_at(zi.comfort_high, i) for i in range(n)],
+        "floor": [_at(zi.floor, i) for i in range(n)],
+        "quiet": [bool(_at(zi.quiet, i)) for i in range(n)],
+        "bt_control": zi.bt_control,
+        "bt_target": _bt_target(zi, on_plan or [None] * n, n, now),
     }
 
 
@@ -213,6 +245,7 @@ def build_view(
     events: list[dict[str, Any]],
     errors: list[str],
     dhw: list[float | None] | None = None,
+    burner_starts: list[float | None] | None = None,  # burner starts per past hour (counter increase)
 ) -> dict[str, Any]:
     n = len(window.hours)
     now = window.now_index
@@ -226,7 +259,7 @@ def build_view(
             if now + h < n:
                 on_plan[now + h] = on
     past_flags = [i < now and a is not None and a >= 0.5 for i, a in enumerate(heating_actual)]
-    zviews = [_zone_view(zi, outlook, n, now) for zi in zones]
+    zviews = [_zone_view(zi, outlook, n, now, on_plan) for zi in zones]
 
     # --- days
     dates: list[date] = [h.astimezone(tz).date() for h in window.hours]
@@ -258,6 +291,14 @@ def build_view(
         pairs = [(release[i], planner[i]) for i in past if release[i] is not None and planner[i] is not None]
         has_plan = outlook is not None and kind != "past"
         last_std = [zv["plan"]["std"][idx[-1]] for zv in zviews if zv["plan"]["std"][idx[-1]] is not None]
+        start_vals = [burner_starts[i] for i in past if burner_starts and burner_starts[i] is not None]
+        n_starts = round(sum(start_vals)) if start_vals and kind != "future" else None
+        n_blocks = sum(1 for i in past if past_flags[i] and (i == 0 or not past_flags[i - 1]))
+        over = [
+            (zv["measured"][i] if i < now else zv["plan"]["mean"][i]) - zv["comfort_high"][i]
+            for zv in zviews for i in idx
+            if zv["comfort_high"][i] is not None and (zv["measured"][i] if i < now else zv["plan"]["mean"][i]) is not None
+        ]
         days.append(
             {
                 "date": d.isoformat(),
@@ -271,6 +312,9 @@ def build_view(
                 "min_leading_planned": _r(min(low)) if low else None,
                 "release_followed": round(sum(a == b for a, b in pairs) / len(pairs), 3) if pairs else None,
                 "std_end": _r(max(last_std)) if last_std and kind == "future" else None,
+                "starts": n_starts,
+                "starts_per_block": _r(n_starts / n_blocks, 1) if n_starts is not None and n_blocks else None,
+                "over_high_max": _r(max(over)) if over else None,
             }
         )
 

@@ -12,6 +12,9 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    CONF_BT_CONTROL,
+    CONF_BT_ENTITY,
+    CONF_BURNER_STARTS,
     CONF_CONFIDENCE_Z,
     CONF_DHW_ENTITY,
     CONF_GAIN_ENTITIES,
@@ -29,15 +32,16 @@ from .const import (
     DEFAULT_MIN_BLOCK_H,
     DOMAIN,
 )
+from .core.bt import round_target
 from .core.explain import PlanSnapshot, plan_change, snapshot_from
 from .core.model import Prediction
 from .core.planner import charge_cost
 from .core.quality import hindcast
 from .core.rollout import ActuatorState, block_lengths_for
 from .core.rules import apply_rules, binary_value, release_state
-from .core.series import hourly_fraction, hourly_mean, mask_off
+from .core.series import hourly_fraction, hourly_increase, hourly_mean, mask_off
 from .core.view import ZoneViewInput, align, build_view, compute_outlook, make_window
-from .history import async_fetch_states
+from .history import async_fetch_attribute, async_fetch_states
 
 if TYPE_CHECKING:
     from .coordinator import ThermocastCoordinator, ThermocastData
@@ -139,6 +143,7 @@ class ViewBuilder:
             "forecast_age_min": _round(data.forecast_age_min, 0),
             "release_entity": a.entity_id,
             "release_state": a.entity_is_on(),
+            "bt": data.bt,  # Better Thermostat target/reason per controlled zone
         }
 
     def _events(self) -> list[dict[str, Any]]:
@@ -153,7 +158,16 @@ class ViewBuilder:
         return st.name if st else entity_id
 
     async def _async_build(self, now: datetime, hour0: datetime, data: ThermocastData) -> dict[str, Any]:
-        from .coordinator import build_plan_inputs, starts_weight, zone_comfort
+        from .coordinator import (
+            build_plan_inputs,
+            starts_weight,
+            zone_base,
+            zone_charge_cap,
+            zone_comfort,
+            zone_floor,
+            zone_high,
+            zone_quiet,
+        )
 
         c = self._c
         hass = c.hass
@@ -172,12 +186,15 @@ class ViewBuilder:
         sensors = {sid: list(z.cfg.get(CONF_TEMP_SENSORS, [])) for sid, z in c.zones.items()}
         outdoor, pump, rel = cfg.get(CONF_OUTDOOR_SENSOR), cfg.get(CONF_HEATING_ACTIVE), cfg.get(CONF_RELEASE_ENTITY)
         dhw_eid = c.config_entry.options.get(CONF_DHW_ENTITY)
-        wanted = {e for lst in sensors.values() for e in lst} | {outdoor, pump, rel, planner_eid, dhw_eid}
+        starts_eid = c.config_entry.options.get(CONF_BURNER_STARTS)
+        wanted = {e for lst in sensors.values() for e in lst} | {outdoor, pump, rel, planner_eid, dhw_eid, starts_eid}
 
         states = await async_fetch_states(hass, {e for e in wanted if e}, hours[0], now)
         if states is None:
             errors.append("no_recorder")
             states = {}
+        bt_ids = {z.cfg[CONF_BT_ENTITY] for z in c.zones.values() if z.cfg.get(CONF_BT_CONTROL) and z.cfg.get(CONF_BT_ENTITY)}
+        bt_hist = await async_fetch_attribute(hass, bt_ids, "temperature", hours[0], now) or {}
 
         def mean_of(eid: str | None) -> list[float | None]:
             return hourly_mean(states.get(eid, []), hours, now) if eid else [None] * n
@@ -270,12 +287,22 @@ class ViewBuilder:
                 (p[0] if (p := z.flog.predicted(hours[i], 6)) else None) if i <= window.now_index else None
                 for i in range(n)
             ]
+            quiet = [zone_quiet(z, h) for h in hours]
+            floor = [zone_floor(z, h) for h in hours]
+            bt_on = bt_off = bt_past = []
+            bt_eid = z.cfg.get(CONF_BT_ENTITY) if z.cfg.get(CONF_BT_CONTROL) else None
+            if bt_eid:
+                bt_on = [round_target(cap) if (cap := zone_charge_cap(z, h)) is not None else None for h in hours]
+                bt_off = [round_target(zone_base(z) if q else f) for q, f in zip(quiet, floor)]
+                bt_past = hourly_mean(bt_hist.get(bt_eid, []), hours, now)
             zones.append(
                 ZoneViewInput(
                     id=sid, name=z.title, heat_type=z.cfg.get(CONF_HEAT_TYPE, "fbh"),
                     leads=bool(z.cfg.get(CONF_LEADS_RELEASE, True)), measured=measured,
                     comfort_low=[zone_comfort(z, h) for h in hours], group_labels=group_labels,
                     contrib_past=contrib_past, forecast6=forecast6,
+                    comfort_high=[zone_high(z)] * n, floor=floor, quiet=quiet, bt_control=bool(bt_eid),
+                    bt_on=bt_on, bt_off=bt_off, bt_past=bt_past,
                 )
             )
         zones.sort(key=lambda zv: (not zv.leads, zv.name.lower()))
@@ -285,4 +312,5 @@ class ViewBuilder:
             heating_actual=heating_actual, release=release, planner=planner, zones=zones, outlook=outlook,
             z=zval, decision=self._decision(now, data), plan_change=change, events=self._events(), errors=errors,
             dhw=fraction_of(dhw_eid, binary_value) if dhw_eid else None,
+            burner_starts=hourly_increase(states.get(starts_eid, []), hours, now) if starts_eid else None,
         )

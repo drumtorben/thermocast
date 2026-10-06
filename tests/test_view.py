@@ -135,6 +135,46 @@ def test_past_causes_forecast6_and_dhw():
     assert v["heating"]["dhw"][3] == 0.25
 
 
+def test_charge_fields_bt_targets_and_starts():
+    w = make_window(NOW, TZ, "Europe/Berlin")
+    n, now = len(w.hours), w.now_index
+    hours_avail = n - now + 24
+    times = [w.hours[now] + timedelta(hours=h + 1) for h in range(hours_avail)]
+    zpi = ZonePlanInput(
+        name="eg", model=trained_model(), temp_now=20.4, future=future(-3.0, hours_avail),
+        comfort_low=[_comfort_at(t) or 18.0 for t in times], q_on=15.0,
+    )
+    zvi = ZoneViewInput(
+        id="eg", name="Büro", heat_type="radiator", leads=True, measured=[20.5 if i < now else None for i in range(n)],
+        comfort_low=[_comfort_at(h) for h in w.hours], group_labels={},
+        comfort_high=[21.5] * n, floor=[_comfort_at(h) or 18.0 for h in w.hours],
+        quiet=[h.astimezone(TZ).hour >= 22 for h in w.hours], bt_control=True,
+        bt_on=[21.5] * n, bt_off=[20.0] * n, bt_past=[19.0 if i < now else None for i in range(n)],
+    )
+    steps = n - now
+    day_index = [w.hours[min(now + h, n - 1)].astimezone(TZ).toordinal() for h in range(steps)]
+    out = compute_outlook([zpi], steps, Rules(), ActuatorState(on=False), day_index, w.hours[now])
+    starts = [3.0 if i == 4 else 0.0 if i < now else None for i in range(n)]
+    v = build_view(
+        window=w, tz=TZ, generated_at=NOW, t_out_measured=[None] * n, t_out_forecast=[-3.0] * n, irr=[],
+        heating_actual=[1.0 if 3 <= i < 7 else 0.0 if i < now else None for i in range(n)],
+        release=[None] * n, planner=[None] * n, zones=[zvi], outlook=out, z=1.0,
+        decision={"override": "observe", "bt": {"eg": {"target": 21.5, "reason": "observe"}}},
+        plan_change=None, events=[], errors=[], burner_starts=starts,
+    )
+    z = v["zones"][0]
+    assert z["comfort_high"] == [21.5] * n and z["floor"][0] == 18.0 and z["quiet"][now] is False and z["quiet"][now + 2] is True
+    assert z["bt_control"] is True and z["bt_target"][0] == 19.0
+    on = {i for b in v["heating"]["planned_blocks"] for i in range(n) if b["start"] <= v["hours"][i] < b["end"]}
+    assert on, "cold weather -> planned blocks"
+    assert all(z["bt_target"][i] == (21.5 if i in on else 20.0) for i in range(now, n))
+    yesterday = v["days"][0]
+    assert yesterday["starts"] == 3 and yesterday["starts_per_block"] == 3.0
+    assert yesterday["over_high_max"] == -1.0  # measured 20.5 vs upper bound 21.5
+    assert v["days"][2]["over_high_max"] is not None
+    json.dumps(v)
+
+
 def test_short_forecast_and_no_outlook():
     w, v = _view(hours_avail=10)
     assert v["zones"][0]["plan"]["mean"][-1] is None

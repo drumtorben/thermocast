@@ -17,6 +17,8 @@ const C = {
   base: "#BDBDBD",
   cand: "#E69F00",
   event: "#D55E00",
+  high: "#E69F00", // upper bound (charging limit)
+  bt: "#7B3294", // thermostat target (Better Thermostat)
 };
 const SUN = ["#E69F00", "#F0E442", "#B8860B", "#FFB000"];
 const LS_KEY = "thermocast.why";
@@ -290,10 +292,27 @@ class TcTimeline extends LitElement {
     const candTraj = c?.trajectories?.[z.id] ?? null;
     const upper = z.plan.mean.map((m, i) => (isNum(m) ? m + (z.plan.std[i] ?? 0) : null));
     const lower = z.plan.mean.map((m, i) => (isNum(m) ? m - (z.plan.std[i] ?? 0) : null));
+    const high = z.comfort_high ?? [];
+    const btTarget = z.bt_target ?? [];
     const sc = this._scale(
-      [...z.measured, ...upper, ...lower, ...z.free.mean, ...z.comfort_low, ...(candTraj ?? []), ...(z.forecast6 ?? [])],
+      [...z.measured, ...upper, ...lower, ...z.free.mean, ...z.comfort_low, ...(candTraj ?? []), ...(z.forecast6 ?? []),
+        ...high, ...btTarget],
       h,
     );
+    // step line (value holds for the whole hour)
+    const steps = (vals, color, width, dash) =>
+      segments(vals).map((seg) => {
+        const pts = [];
+        seg.forEach(([i, v]) => pts.push([this._x(i), sc.y(v)], [this._x(i + 1), sc.y(v)]));
+        return svg`<polyline points=${this._path(pts)} fill="none" stroke=${color} stroke-width=${width}
+          stroke-dasharray=${dash}></polyline>`;
+      });
+    const quiet = runs(z.quiet ?? []).map(
+      ([s, e]) => svg`<rect x=${this._x(s)} y="0" width=${(e - s) * this._pph} height=${h} fill="url(#tc-quiet)"></rect>`,
+    );
+    const quietDefs = svg`<defs><pattern id="tc-quiet" width="6" height="6" patternUnits="userSpaceOnUse"
+      patternTransform="rotate(-45)"><rect width="1" height="6" fill="var(--secondary-text-color, #727272)"
+      opacity="0.25"></rect></pattern></defs>`;
 
     const comfort = runs(z.comfort_low.map(isNum)).map(([s, e]) => {
       const pts = [];
@@ -314,7 +333,9 @@ class TcTimeline extends LitElement {
       );
     const axis = svg`<text class="axis" x=${GUTTER - 4} y=${sc.y(sc.hi) + 10} text-anchor="end">${fmtNum(sc.hi, L)}°</text>
       <text class="axis" x=${GUTTER - 4} y=${sc.y(sc.lo)} text-anchor="end">${fmtNum(sc.lo, L)}°</text>`;
-    const body = svg`${comfort}${band}
+    const body = svg`${quietDefs}${quiet}${comfort}${band}
+      ${steps(high, C.high, 1.2, "6 3")}
+      ${z.bt_control ? steps(btTarget, C.bt, 1.6, "") : nothing}
       ${line(z.free.mean, C.free, 1.4, "3 3")}
       ${line(z.measured, "var(--primary-text-color, #212121)", 1.8, "", true)}
       ${line(z.plan.mean, C.plan, 2, "")}
@@ -422,9 +443,12 @@ class TcTimeline extends LitElement {
             .slice(0, 5)
         : [];
       const net = c ? Object.values(c).reduce((a, b) => a + b, 0) : null;
+      const bt = z.bt_control && isNum((z.bt_target || [])[i]) ? z.bt_target[i] : null;
       return html`<div class="tz">
         <b>${z.name}</b> ${fmtNum(val, L)} °C${std ? html` (±${fmtNum(std, L)})` : nothing}
         <span class="muted">${t(L, past ? "measured" : "plan")}</span>
+        ${bt !== null ? html`<span class="muted">· ${t(L, "bt_target")} ${fmtNum(bt, L)} °C</span>` : nothing}
+        ${(z.quiet || [])[i] ? html`<span class="muted">· ${t(L, "quiet")}</span>` : nothing}
         ${parts.length
           ? html`<div class="parts">
               ${parts.map(([g, x]) => html`<span>${this._groupLabel(g)} ${fmtSigned(x, L, 2)}</span>`)}
@@ -476,6 +500,13 @@ class TcTimeline extends LitElement {
           ? html`<span><i style="background:${C.loss}"></i>${t(this.lang, "dhw")}</span>`
           : nothing}
         <span><i style="background:${C.comfort}"></i>${t(this.lang, "comfort")}</span>
+        <span><i style="background:${C.high}"></i>${t(this.lang, "upper_bound")}</span>
+        ${this.view.zones.some((z) => z.bt_control)
+          ? html`<span><i style="background:${C.bt}"></i>${t(this.lang, "bt_target")}</span>`
+          : nothing}
+        ${this.view.zones.some((z) => (z.quiet || []).some(Boolean))
+          ? html`<span><i style="background:var(--divider-color,#ccc)"></i>${t(this.lang, "quiet")}</span>`
+          : nothing}
         <span><i style="background:${C.heat}"></i>${t(this.lang, "heating")}</span>
         <span><i style="background:${C.outdoor}"></i>${t(this.lang, "t_out")}</span>
       </div>

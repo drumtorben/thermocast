@@ -55,6 +55,16 @@ def test_thermostat_heating_share():
     assert hvac_heating("preheating") == 1.0 and hvac_heating(None) is None
 
 
+def test_counter_increase_per_hour():
+    from core.series import hourly_increase
+
+    m = lambda k: T0 + timedelta(minutes=k)
+    starts = [(m(-30), "100"), (m(20), "101"), (m(50), "103"), (m(70), "unavailable"), (m(80), "104"), (m(130), "0")]
+    # hour 0: 100 -> 103; hour 1: 103 -> 104 (unavailable skipped); hour 2: counter reset -> no negative count
+    assert hourly_increase(starts, HOURS[:3], T0 + timedelta(hours=2, minutes=30)) == [3.0, 1.0, 0.0]
+    assert hourly_increase([], HOURS[:2], T0 + timedelta(hours=2)) == [None, None]
+
+
 def test_gateway_boolean_formats():
     """EMS-ESP publishes booleans as ON/OFF, true/false or (German locale) an/aus."""
     for on in ("on", "ON", "true", "an", "Ein", "1", "2.5"):

@@ -17,6 +17,7 @@ class TcDetails extends LitElement {
     const L = this.lang;
     const rows = this.view.candidates;
     if (!rows.length) return nothing;
+    const overheat = rows.some((c) => "overheat" in c.parts);
     return html`<div class="card">
       <h3>${t(L, "candidates")}</h3>
       <div class="scroll">
@@ -26,6 +27,7 @@ class TcDetails extends LitElement {
               <th>${t(L, "c_block")}</th>
               <th>${t(L, "c_violation")}</th>
               <th>${t(L, "c_comfort")}</th>
+              ${overheat ? html`<th>${t(L, "c_overheat")}</th>` : nothing}
               <th>${t(L, "c_start")}</th>
               <th>${t(L, "c_energy")}</th>
               <th>${t(L, "c_delay")}</th>
@@ -43,6 +45,7 @@ class TcDetails extends LitElement {
                   <td>${this._block(c)}</td>
                   <td>${fmtNum(c.violation_kh, L, 2)}</td>
                   <td>${fmtNum(c.parts.comfort ?? 0, L, 2)}</td>
+                  ${overheat ? html`<td>${fmtNum(c.parts.overheat ?? 0, L, 2)}</td>` : nothing}
                   <td>${fmtNum(c.parts.start ?? 0, L, 2)}</td>
                   <td>${fmtNum(c.parts.energy ?? 0, L, 2)}</td>
                   <td>${fmtNum(c.parts.delay ?? 0, L, 2)}</td>

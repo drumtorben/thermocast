@@ -23,7 +23,7 @@ sys.path.insert(0, str(ROOT))
 
 from core.kpi import ZoneKpiInput, daily_kpis, summary
 from core.model import HourRecord, OnlineZoneModel, SurfaceSpec, ZoneSpec
-from core.planner import ZonePlanInput
+from core.planner import ZonePlanInput, charge_cost
 from core.quality import ForecastLog, QualityInput, RingLog, hindcast, param_snapshot, zone_quality
 from core.rollout import ActuatorState, block_lengths_for
 from core.rules import Rules
@@ -41,9 +41,9 @@ SURFACES = (
     SurfaceSpec(kind="roof", azimuth=180, tilt=40, name="Schräge Süd"),
 )
 COLD = -6.0  # shift the synthetic autumn into a colder week, so the planner has work to do
-ZONES = [  # id, name, heat type, leads, comfort low
-    ("zone_eg", "EG", "fbh", True, 20.2),
-    ("zone_eltern", "Elternschlafzimmer", "radiator", False, 19.0),
+ZONES = [  # id, name, heat type, leads, comfort low, upper bound, base, BT control (quiet 22–06)
+    ("zone_eg", "EG", "fbh", True, 20.2, 21.5, 18.5, False),
+    ("zone_eltern", "Elternschlafzimmer", "radiator", False, 19.0, 20.0, 17.0, True),
 ]
 
 
@@ -96,8 +96,19 @@ def main() -> None:
     def comfort(t: datetime, low: float) -> float | None:
         return low if 6 <= t.astimezone(TZ).hour < 22 else None
 
+    def quiet(t: datetime) -> bool:
+        hour = t.astimezone(TZ).hour
+        return hour >= 22 or hour < 6
+
     plan_inputs, view_zones, quality = [], [], []
-    for zid, name, heat_type, leads, low in ZONES:
+    for zid, name, heat_type, leads, low, high, base_t, bt in ZONES:
+
+        def floor(t: datetime, low=low, base_t=base_t) -> float:
+            return comfort(t, low) or base_t
+
+        def cap(t: datetime, high=high, base_t=base_t, bt=bt) -> float | None:
+            return (base_t if quiet(t) else high) if bt else None
+
         m, log, flog, params = _train(sim, heat_type, base + now, hour_of)
         entries = log.to_list()
         hc = {e["t"]: h for e, h in zip(entries, hindcast(m, entries, TZ))}
@@ -107,7 +118,8 @@ def main() -> None:
             ZonePlanInput(
                 name=zid, model=m, temp_now=round(float(sim["air"][base + now]), 2),
                 future=[HourRecord(temp=0.0, t_out=float(sim["t_out"][k]) + COLD, irr=_irr(sim, k)) for k in fut_k],
-                comfort_low=[comfort(t, low) for t in times], q_on=15.0, leads_release=leads,
+                comfort_low=[floor(t) for t in times], q_on=15.0, leads_release=leads,
+                comfort_high=[high] * len(times), charge_cap=[cap(t - HOUR) for t in times],
             )
         )
         view_zones.append(
@@ -119,6 +131,12 @@ def main() -> None:
                 forecast6=[
                     (p[0] if (p := flog.predicted(w.hours[i], 6)) else None) if i <= now else None for i in range(n)
                 ],
+                comfort_high=[high] * n, floor=[floor(h) for h in w.hours],
+                quiet=[bt and quiet(h) for h in w.hours], bt_control=bt,
+                bt_on=[cap(h) for h in w.hours] if bt else [],
+                bt_off=[base_t if quiet(h) else floor(h) for h in w.hours] if bt else [],
+                bt_past=[(high if sim["q"][base + i] > 0 else floor(w.hours[i])) if i < now else None for i in range(n)]
+                if bt else [],
             )
         )
         quality.append(
@@ -132,8 +150,10 @@ def main() -> None:
     steps = n - now
     day_index = [w.hours[min(now + h, n - 1)].astimezone(TZ).toordinal() for h in range(steps)]
     outlook = compute_outlook(
-        plan_inputs, steps, Rules(), ActuatorState(on=False), day_index, w.hours[now], block_lengths=block_lengths_for(3)
+        plan_inputs, steps, Rules(), ActuatorState(on=False), day_index, w.hours[now], block_lengths=block_lengths_for(3),
+        cost_fn=charge_cost(0.8),
     )
+    on_now = bool(outlook.rollout.on and outlook.rollout.on[0])
     heating = [(1.0 if sim["q"][base + i] > 0 else 0.0) if i <= now else None for i in range(n)]
     dhw = [(0.3 if w.hours[i].astimezone(TZ).hour in (6, 18) else 0.0) if i <= now else None for i in range(n)]
     view = build_view(
@@ -152,7 +172,8 @@ def main() -> None:
             "planner_wants": outlook.rollout.first.heat_now, "applied": True, "control_enabled": False,
             "override": "observe", "failsafe_reason": None, "switches_today": 0, "max_switches": 12,
             "rules": {"min_block_h": 3, "min_pause_h": 2, "max_switches": 12}, "since_last_change_min": None,
-            "forecast_age_min": 12, "release_entity": "number.boiler_summer_threshold", "release_state": True,
+            "forecast_age_min": 12, "release_entity": "select.thermostat_hc1_summersetmode", "release_state": True,
+            "bt": {"zone_eltern": {"target": 20.0 if on_now else 19.0, "reason": "observe", "override_until": None}},
         },
         plan_change={
             "previous_block": {"start": w.hours[now + 6].isoformat(), "end": w.hours[now + 10].isoformat()},
@@ -165,6 +186,8 @@ def main() -> None:
         ],
         errors=[],
         dhw=dhw,
+        burner_starts=[(2.0 if heating[i] and not (i and heating[i - 1]) else 0.5 if heating[i] else 0.0)
+                       if i < now else None for i in range(n)],
     )
     model_view = {"version": 1, "generated_at": NOW.isoformat(), "days": 7, "zones": quality}
     kpis = _sample_kpis()

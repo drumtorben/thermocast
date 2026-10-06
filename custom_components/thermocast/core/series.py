@@ -4,6 +4,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable, Iterator
 from datetime import datetime, timedelta
+from itertools import pairwise
 
 StateSeries = list[tuple[datetime, str]]
 HOUR = timedelta(hours=1)
@@ -65,6 +66,25 @@ def mask_off(series: StateSeries, mask: StateSeries, is_on: Callable[[str], floa
         state = "off" if masked and is_on(cur) is not None else cur
         if not out or out[-1][1] != state:
             out.append((t, state))
+    return out
+
+
+def hourly_increase(series: StateSeries, hours: list[datetime], end: datetime) -> list[float | None]:
+    """Increase of a counter (e.g. burner starts) per hour; drops (counter reset) count as 0."""
+    values = [(t, v) for t, s in series if (v := _float(s)) is not None]
+    out: list[float | None] = []
+    for h in hours:
+        b = min(h + HOUR, end)
+        if b <= h:
+            out.append(None)
+            continue
+        before = [v for t, v in values if t < h]
+        inside = [v for t, v in values if h <= t < b]
+        seq = before[-1:] + inside
+        if not seq:
+            out.append(None)
+            continue
+        out.append(float(sum(max(0.0, y - x) for x, y in pairwise(seq))))
     return out
 
 

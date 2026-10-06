@@ -20,6 +20,14 @@ class TcDays extends LitElement {
       );
     if (d.kind === "future")
       lines.push(t(L, "day_heat_plan", { p: fmtNum(d.heat_hours_planned ?? 0, L), m: d.blocks_planned ?? 0 }));
+    if (d.starts !== null && d.starts !== undefined)
+      lines.push(
+        d.starts_per_block !== null && d.starts_per_block !== undefined
+          ? t(L, "day_starts_per_block", { n: d.starts, k: fmtNum(d.starts_per_block, L) })
+          : t(L, "day_starts", { n: d.starts }),
+      );
+    if (d.over_high_max !== null && d.over_high_max !== undefined && d.over_high_max > 0)
+      lines.push(t(L, "day_over_high", { k: fmtNum(d.over_high_max, L) }));
     if (d.min_leading !== null) lines.push(t(L, "day_min", { t: fmtNum(d.min_leading, L) }));
     if (d.min_leading_planned !== null) lines.push(t(L, "day_min_plan", { t: fmtNum(d.min_leading_planned, L) }));
     if (d.release_followed !== null) lines.push(t(L, "day_followed", { p: Math.round(d.release_followed * 100) }));

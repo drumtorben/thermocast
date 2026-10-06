@@ -32,12 +32,15 @@ class TcSummary extends LitElement {
     const zone = ex.driver ? this._zoneName(ex.driver) : "";
     const z = this.view.zones.find((zz) => zz.id === ex.driver);
     const idx = ex.first_violation ? this.view.hours.indexOf(ex.first_violation) : -1;
-    const comfort = z && idx >= 0 ? z.comfort_low[idx] : null;
+    // the planner's lower bound: comfort in comfort time, otherwise the base temperature
+    const comfort = z && idx >= 0 ? (z.floor?.[idx] ?? z.comfort_low[idx]) : null;
     const temp = fmtNum(comfort, L);
     const when = ex.first_violation ? this._when(ex.first_violation) : "";
     switch (ex.code) {
       case "block_planned":
-        return t(L, "exp_block_planned", { zone, temp, when, lead: ex.lead_h ?? "–" });
+        return (ex.lead_h ?? 0) > 0
+          ? t(L, "exp_block_planned", { zone, temp, when, lead: ex.lead_h })
+          : t(L, "exp_block_planned_short", { zone, temp, when });
       case "heating_now":
         return ex.driver
           ? t(L, "exp_heating_now", { zone, temp, when, end: fmtTime(ex.next_block.end, L, this.tz) })
@@ -72,6 +75,27 @@ class TcSummary extends LitElement {
     return html`<p class="change">${t(L, "plan_changed", { what })}</p>`;
   }
 
+  _btNotes() {
+    const bt = this.view.decision.bt || {};
+    const L = this.lang;
+    const now = this.view.window.now_index;
+    const charging = [];
+    const notes = [];
+    for (const [id, b] of Object.entries(bt)) {
+      const z = this.view.zones.find((zz) => zz.id === id);
+      const name = z?.name ?? id;
+      if (b.reason === "override")
+        notes.push(t(L, "bt_override_until", { zone: name, until: fmtTime(b.override_until, L, this.tz) }));
+      else if (b.reason === "quiet") notes.push(t(L, "bt_quiet_note", { zone: name }));
+      else if (b.reason === "unavailable") notes.push(t(L, "bt_unavailable", { zone: name }));
+      const high = z?.comfort_high?.[now];
+      if (b.target !== null && high !== null && high !== undefined && Math.abs(b.target - high) < 0.3)
+        charging.push(`${name} ${fmtNum(b.target, L)} °C`);
+    }
+    if (charging.length) notes.unshift(t(L, "bt_charging", { zones: charging.join(", ") }));
+    return notes.length ? html`<p class="note">${notes.join(" · ")}</p>` : nothing;
+  }
+
   _chips() {
     const { decision: d, robustness: r } = this.view;
     const L = this.lang;
@@ -102,7 +126,7 @@ class TcSummary extends LitElement {
       <div class="card">
         <div class="headline">${this._headline()}</div>
         <p class="why">${this._sentence()}</p>
-        ${overrideNote} ${this._planChange()}
+        ${overrideNote} ${this._btNotes()} ${this._planChange()}
         <div class="chips">${this._chips()}</div>
       </div>
     `;
