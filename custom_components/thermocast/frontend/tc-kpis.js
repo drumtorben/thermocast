@@ -116,12 +116,15 @@ class TcKpis extends LitElement {
               .marks=${marks} .xTick=${tick} .xTip=${tip} .fmt=${(v) => fmtNum(v, L, 0)}></tc-chart>
           </div>`
         : nothing}
-      ${any("kwh_per_hdd") || any("t_out_mean")
+      ${any("energy_kwh") || any("kwh_per_hdd") || any("t_out_mean")
         ? html`<div class="card">
             <div class="sub">${t(L, "k_chart_energy")}</div>
             <tc-chart .labels=${labels}
               .series=${[
-                { name: t(L, "k_energy"), values: col("kwh_per_hdd"), color: "#0072B2", type: "bar" },
+                // energy per day always shows (also on mild days and for today so far); per degree day only
+                // where it is defined (heating degree days > 0)
+                { name: t(L, "k_energy_day"), values: col("energy_kwh"), color: "#56B4E9", type: "bar" },
+                { name: t(L, "k_energy"), values: col("kwh_per_hdd"), color: "#0072B2", type: "dots" },
                 { name: t(L, "k_tout"), values: col("t_out_mean"), color: "#CC79A7", axis: "r" },
               ]}
               .marks=${marks} .xTick=${tick} .xTip=${tip} .fmt=${(v) => fmtNum(v, L, 1)}></tc-chart>
@@ -134,7 +137,7 @@ class TcKpis extends LitElement {
               .marks=${marks} .xTick=${tick} .xTip=${tip} .fmt=${(v) => fmtNum(v, L, 1)}></tc-chart>
           </div>`
         : nothing}
-      ${!any("starts") && !any("kwh_per_hdd") && !any("min_leading") ? html`<p class="card">${t(L, "k_no_data")}</p>` : nothing}
+      ${!any("starts") && !any("energy_kwh") && !any("kwh_per_hdd") && !any("min_leading") ? html`<p class="card">${t(L, "k_no_data")}</p>` : nothing}
       <p class="muted small">${t(L, "k_hdd_base", { b: fmtNum(d.hdd_base, L, 0) })}</p>
     `;
   }
