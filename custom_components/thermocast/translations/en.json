@@ -71,7 +71,13 @@
             "neighbor_sensors": "Neighbour temperature sensors",
             "gain_entities": "Internal heat gains",
             "window_entities": "Window/door contacts",
-            "comfort_schedule": "Comfort schedule (optional)"
+            "comfort_schedule": "Comfort schedule (optional)",
+            "comfort_high": "Upper bound (charging)",
+            "base_temp": "Base temperature (outside comfort time)",
+            "bt_control": "Control the Better Thermostat target",
+            "bt_entity": "Better Thermostat entity",
+            "quiet_from": "Quiet time from",
+            "quiet_to": "Quiet time until"
           },
           "data_description": {
             "surfaces": "YAML list, e.g. [{kind: window, azimuth: 90, tilt: 90}, {kind: roof, azimuth: 180, tilt: 40}]. Azimuth: 0=N, 90=E, 180=S, 270=W.",
@@ -79,7 +85,12 @@
             "valve_entity": "Radiators only. Best: the TRV's own thermostat (climate) – its heating/idle state is used. A sensor with the real valve opening in % also works. Not a configured limit like valve_opening_degree.",
             "gain_entities": "Power sensors (W), presence or on/off entities that add heat.",
             "neighbor_sensors": "Temperatures of adjacent rooms (heat exchange is learned).",
-            "comfort_schedule": "A schedule helper (e.g. weekdays 8–17 for the office). When set, it replaces 'Comfort from/until'."
+            "comfort_schedule": "A schedule helper (e.g. weekdays 8–17 for the office). When set, it replaces 'Comfort from/until'.",
+            "comfort_high": "A heating block may warm the zone up to here, so the boiler can run long and pause long. Default: comfort + 1 K.",
+            "base_temp": "Lowest temperature outside the comfort time (night, office closed). Default: comfort − 2 K.",
+            "bt_control": "Thermocast sets the target of this room's Better Thermostat: upper bound during a block, otherwise the lower bound. Disable Better Thermostat schedules/automations for this room.",
+            "bt_entity": "The climate entity of Better Thermostat (not the TRV itself).",
+            "quiet_from": "No thermostat changes (valve noise) during the quiet time; 15 min before it starts the target is set to the base temperature."
           }
         },
         "reconfigure": {
@@ -98,7 +109,13 @@
             "neighbor_sensors": "Neighbour temperature sensors",
             "gain_entities": "Internal heat gains",
             "window_entities": "Window/door contacts",
-            "comfort_schedule": "Comfort schedule (optional)"
+            "comfort_schedule": "Comfort schedule (optional)",
+            "comfort_high": "Upper bound (charging)",
+            "base_temp": "Base temperature (outside comfort time)",
+            "bt_control": "Control the Better Thermostat target",
+            "bt_entity": "Better Thermostat entity",
+            "quiet_from": "Quiet time from",
+            "quiet_to": "Quiet time until"
           },
           "data_description": {
             "surfaces": "YAML list, e.g. [{kind: window, azimuth: 90, tilt: 90}, {kind: roof, azimuth: 180, tilt: 40}]. Azimuth: 0=N, 90=E, 180=S, 270=W.",
@@ -106,13 +123,21 @@
             "valve_entity": "Radiators only. Best: the TRV's own thermostat (climate) – its heating/idle state is used. A sensor with the real valve opening in % also works. Not a configured limit like valve_opening_degree.",
             "gain_entities": "Power sensors (W), presence or on/off entities that add heat.",
             "neighbor_sensors": "Temperatures of adjacent rooms (heat exchange is learned).",
-            "comfort_schedule": "A schedule helper (e.g. weekdays 8–17 for the office). When set, it replaces 'Comfort from/until'."
+            "comfort_schedule": "A schedule helper (e.g. weekdays 8–17 for the office). When set, it replaces 'Comfort from/until'.",
+            "comfort_high": "A heating block may warm the zone up to here, so the boiler can run long and pause long. Default: comfort + 1 K.",
+            "base_temp": "Lowest temperature outside the comfort time (night, office closed). Default: comfort − 2 K.",
+            "bt_control": "Thermocast sets the target of this room's Better Thermostat: upper bound during a block, otherwise the lower bound. Disable Better Thermostat schedules/automations for this room.",
+            "bt_entity": "The climate entity of Better Thermostat (not the TRV itself).",
+            "quiet_from": "No thermostat changes (valve noise) during the quiet time; 15 min before it starts the target is set to the base temperature."
           }
         }
       },
       "error": {
         "invalid_surfaces": "Invalid surface list (kind window/roof/wall, azimuth 0–360, tilt 0–90).",
-        "valve_only_radiator": "A valve entity only makes sense for radiators."
+        "valve_only_radiator": "A valve entity only makes sense for radiators.",
+        "invalid_bounds": "Base temperature must be ≤ comfort − band and the upper bound above comfort.",
+        "bt_entity_missing": "Choose the Better Thermostat entity.",
+        "quiet_incomplete": "Set both start and end of the quiet time (or neither)."
       },
       "abort": {
         "reconfigure_successful": "Zone updated."
@@ -132,7 +157,8 @@
           "dhw_active_entity": "Hot water charging active (optional)",
           "burner_starts_entity": "Burner starts counter (optional)",
           "heat_energy_entity": "Heating energy in kWh (optional)",
-          "calibrate_sigma": "Calibrate the uncertainty"
+          "calibrate_sigma": "Calibrate the uncertainty",
+          "starts_weight": "Few burner starts ↔ little gas"
         },
         "data_description": {
           "forgetting_factor": "0.996 ≈ 10 days memory. Lower adapts faster but is noisier.",
@@ -140,7 +166,8 @@
           "dhw_active_entity": "Hot water charging runs the boiler pump with a hot flow: these times do not count as space heating (model, history, warm start) and are shaded in the timeline. Recommended for combi boilers.",
           "burner_starts_entity": "Total counter (state class total_increasing), e.g. EMS-ESP burner starts. Used for KPIs.",
           "heat_energy_entity": "Total heating energy (kWh, total_increasing), e.g. EMS-ESP energy heating. Used for kWh per heating degree day.",
-          "calibrate_sigma": "Widens σ per forecast horizon so that ±σ covers ~68 % of the forecast errors observed in the last 14 days (needs ≥ 48 checks per horizon; never narrows it)."
+          "calibrate_sigma": "Widens σ per forecast horizon so that ±σ covers ~68 % of the forecast errors observed in the last 14 days (needs ≥ 48 checks per horizon; never narrows it).",
+          "starts_weight": "0 = short blocks, little gas; 100 = few long blocks that charge the rooms up to their upper bound."
         }
       }
     }

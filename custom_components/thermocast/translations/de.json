@@ -71,7 +71,13 @@
             "neighbor_sensors": "Temperatursensoren Nachbarräume",
             "gain_entities": "Innere Wärmequellen",
             "window_entities": "Fenster-/Türkontakte",
-            "comfort_schedule": "Komfort-Zeitplan (optional)"
+            "comfort_schedule": "Komfort-Zeitplan (optional)",
+            "comfort_high": "Obergrenze (Laden)",
+            "base_temp": "Grundwert (außerhalb der Komfortzeit)",
+            "bt_control": "Better-Thermostat-Sollwert steuern",
+            "bt_entity": "Better-Thermostat-Entität",
+            "quiet_from": "Ruhezeit von",
+            "quiet_to": "Ruhezeit bis"
           },
           "data_description": {
             "surfaces": "YAML-Liste, z. B. [{kind: window, azimuth: 90, tilt: 90}, {kind: roof, azimuth: 180, tilt: 40}]. Azimut: 0=N, 90=O, 180=S, 270=W.",
@@ -79,7 +85,12 @@
             "valve_entity": "Nur für Heizkörper. Am besten das Thermostat des TRV selbst (climate) – sein Zustand heizt/inaktiv wird genutzt. Ein Sensor mit der echten Ventilöffnung in % geht auch. Keine eingestellte Grenze wie valve_opening_degree.",
             "gain_entities": "Leistungssensoren (W), Anwesenheit oder Ein/Aus-Entitäten, die Wärme liefern.",
             "neighbor_sensors": "Temperaturen angrenzender Räume (der Wärmeaustausch wird gelernt).",
-            "comfort_schedule": "Ein Zeitplan-Helfer (z. B. werktags 8–17 Uhr fürs Büro). Wenn gesetzt, ersetzt er „Komfort von/bis“."
+            "comfort_schedule": "Ein Zeitplan-Helfer (z. B. werktags 8–17 Uhr fürs Büro). Wenn gesetzt, ersetzt er „Komfort von/bis“.",
+            "comfort_high": "Ein Heizblock darf die Zone bis hierher aufwärmen, damit der Kessel lange läuft und lange pausiert. Standard: Komfort + 1 K.",
+            "base_temp": "Niedrigste Temperatur außerhalb der Komfortzeit (Nacht, Büro zu). Standard: Komfort − 2 K.",
+            "bt_control": "Thermocast setzt den Sollwert des Better Thermostats dieses Raums: im Block die Obergrenze, sonst die Untergrenze. Better-Thermostat-Zeitpläne/Automationen für diesen Raum deaktivieren.",
+            "bt_entity": "Die climate-Entität von Better Thermostat (nicht der TRV selbst).",
+            "quiet_from": "In der Ruhezeit keine Thermostat-Änderungen (Stellgeräusche); 15 min vorher wird einmal der Grundwert gesetzt."
           }
         },
         "reconfigure": {
@@ -98,7 +109,13 @@
             "neighbor_sensors": "Temperatursensoren Nachbarräume",
             "gain_entities": "Innere Wärmequellen",
             "window_entities": "Fenster-/Türkontakte",
-            "comfort_schedule": "Komfort-Zeitplan (optional)"
+            "comfort_schedule": "Komfort-Zeitplan (optional)",
+            "comfort_high": "Obergrenze (Laden)",
+            "base_temp": "Grundwert (außerhalb der Komfortzeit)",
+            "bt_control": "Better-Thermostat-Sollwert steuern",
+            "bt_entity": "Better-Thermostat-Entität",
+            "quiet_from": "Ruhezeit von",
+            "quiet_to": "Ruhezeit bis"
           },
           "data_description": {
             "surfaces": "YAML-Liste, z. B. [{kind: window, azimuth: 90, tilt: 90}, {kind: roof, azimuth: 180, tilt: 40}]. Azimut: 0=N, 90=O, 180=S, 270=W.",
@@ -106,13 +123,21 @@
             "valve_entity": "Nur für Heizkörper. Am besten das Thermostat des TRV selbst (climate) – sein Zustand heizt/inaktiv wird genutzt. Ein Sensor mit der echten Ventilöffnung in % geht auch. Keine eingestellte Grenze wie valve_opening_degree.",
             "gain_entities": "Leistungssensoren (W), Anwesenheit oder Ein/Aus-Entitäten, die Wärme liefern.",
             "neighbor_sensors": "Temperaturen angrenzender Räume (der Wärmeaustausch wird gelernt).",
-            "comfort_schedule": "Ein Zeitplan-Helfer (z. B. werktags 8–17 Uhr fürs Büro). Wenn gesetzt, ersetzt er „Komfort von/bis“."
+            "comfort_schedule": "Ein Zeitplan-Helfer (z. B. werktags 8–17 Uhr fürs Büro). Wenn gesetzt, ersetzt er „Komfort von/bis“.",
+            "comfort_high": "Ein Heizblock darf die Zone bis hierher aufwärmen, damit der Kessel lange läuft und lange pausiert. Standard: Komfort + 1 K.",
+            "base_temp": "Niedrigste Temperatur außerhalb der Komfortzeit (Nacht, Büro zu). Standard: Komfort − 2 K.",
+            "bt_control": "Thermocast setzt den Sollwert des Better Thermostats dieses Raums: im Block die Obergrenze, sonst die Untergrenze. Better-Thermostat-Zeitpläne/Automationen für diesen Raum deaktivieren.",
+            "bt_entity": "Die climate-Entität von Better Thermostat (nicht der TRV selbst).",
+            "quiet_from": "In der Ruhezeit keine Thermostat-Änderungen (Stellgeräusche); 15 min vorher wird einmal der Grundwert gesetzt."
           }
         }
       },
       "error": {
         "invalid_surfaces": "Ungültige Flächenliste (kind window/roof/wall, azimuth 0–360, tilt 0–90).",
-        "valve_only_radiator": "Eine Ventil-Entität ist nur bei Heizkörpern sinnvoll."
+        "valve_only_radiator": "Eine Ventil-Entität ist nur bei Heizkörpern sinnvoll.",
+        "invalid_bounds": "Der Grundwert muss ≤ Komfort − Band sein und die Obergrenze über dem Komfort liegen.",
+        "bt_entity_missing": "Bitte die Better-Thermostat-Entität wählen.",
+        "quiet_incomplete": "Beginn und Ende der Ruhezeit setzen (oder beides leer lassen)."
       },
       "abort": {
         "reconfigure_successful": "Zone aktualisiert."
@@ -132,7 +157,8 @@
           "dhw_active_entity": "Warmwasserladung aktiv (optional)",
           "burner_starts_entity": "Zähler Brennerstarts (optional)",
           "heat_energy_entity": "Heizenergie in kWh (optional)",
-          "calibrate_sigma": "Unsicherheit kalibrieren"
+          "calibrate_sigma": "Unsicherheit kalibrieren",
+          "starts_weight": "Wenige Brennerstarts ↔ wenig Gas"
         },
         "data_description": {
           "forgetting_factor": "0,996 ≈ 10 Tage Gedächtnis. Kleiner = passt sich schneller an, aber unruhiger.",
@@ -140,7 +166,8 @@
           "dhw_active_entity": "Warmwasserladungen laufen über dieselbe Kesselpumpe mit heißem Vorlauf: Diese Zeiten zählen nicht als Heizen (Modell, Verlauf, Warmstart) und werden in der Zeitachse schraffiert. Empfohlen, wenn der Kessel auch den Speicher lädt.",
           "burner_starts_entity": "Gesamtzähler (State-Class total_increasing), z. B. EMS-ESP Brennerstarts. Für die KPIs.",
           "heat_energy_entity": "Gesamte Heizenergie (kWh, total_increasing), z. B. EMS-ESP Energie Heizung. Für kWh pro Heizgradtag.",
-          "calibrate_sigma": "Weitet σ je Prognosehorizont so, dass ±σ etwa 68 % der in den letzten 14 Tagen beobachteten Prognosefehler abdeckt (braucht ≥ 48 Prüfungen je Horizont; verengt nie)."
+          "calibrate_sigma": "Weitet σ je Prognosehorizont so, dass ±σ etwa 68 % der in den letzten 14 Tagen beobachteten Prognosefehler abdeckt (braucht ≥ 48 Prüfungen je Horizont; verengt nie).",
+          "starts_weight": "0 = kurze Blöcke, wenig Gas; 100 = wenige lange Blöcke, die die Räume bis zur Obergrenze laden."
         }
       }
     }

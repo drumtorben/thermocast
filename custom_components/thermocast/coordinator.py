@@ -22,8 +22,11 @@ from .const import (
     CALIBRATION_DAYS,
     CONF_ACTIVE_FROM,
     CONF_ACTIVE_TO,
+    CONF_BASE_TEMP,
+    CONF_BT_CONTROL,
     CONF_CALIBRATE_SIGMA,
     CONF_COMFORT_BAND,
+    CONF_COMFORT_HIGH,
     CONF_COMFORT_SCHEDULE,
     CONF_COMFORT_TEMP,
     CONF_CONFIDENCE_Z,
@@ -37,15 +40,21 @@ from .const import (
     CONF_MIN_BLOCK_H,
     CONF_NEIGHBOR_SENSORS,
     CONF_OUTDOOR_SENSOR,
+    CONF_QUIET_FROM,
+    CONF_QUIET_TO,
+    CONF_STARTS_WEIGHT,
     CONF_SURFACES,
     CONF_TEMP_SENSORS,
     CONF_VALVE_ENTITY,
     CONF_WINDOW_ENTITIES,
+    DEFAULT_BASE_OFFSET,
     DEFAULT_CALIBRATE_SIGMA,
     DEFAULT_CONFIDENCE_Z,
     DEFAULT_FORGETTING,
+    DEFAULT_HIGH_OFFSET,
     DEFAULT_MIN_BLOCK_H,
     DEFAULT_Q_ON,
+    DEFAULT_STARTS_WEIGHT,
     DOMAIN,
     FORECAST_MAX_AGE,
     FORECAST_STALE_FAILSAFE,
@@ -56,7 +65,7 @@ from .const import (
 )
 from .core.forecast import Forecast, fetch_forecast
 from .core.model import HourRecord, OnlineZoneModel, SurfaceSpec, ZoneSpec
-from .core.planner import PlanResult, ZonePlanInput, plan
+from .core.planner import PlanResult, ZonePlanInput, charge_cost, plan
 from .core.quality import ForecastLog, RingLog, calibration, measured_by_hour, param_snapshot, std_scale_profile
 from .core.rollout import block_lengths_for
 from .core.rules import binary_value, hvac_heating
@@ -202,6 +211,40 @@ def zone_comfort(z: ZoneRuntime, when: datetime) -> float | None:
     return float(z.cfg[CONF_COMFORT_TEMP]) - float(z.cfg[CONF_COMFORT_BAND])
 
 
+def zone_high(z: ZoneRuntime) -> float:
+    """Upper bound: a block may charge the zone up to here (default comfort + 1 K)."""
+    value = z.cfg.get(CONF_COMFORT_HIGH)
+    return float(value) if value is not None else float(z.cfg[CONF_COMFORT_TEMP]) + DEFAULT_HIGH_OFFSET
+
+
+def zone_base(z: ZoneRuntime) -> float:
+    """Lower bound outside comfort time (default comfort − 2 K)."""
+    value = z.cfg.get(CONF_BASE_TEMP)
+    return float(value) if value is not None else float(z.cfg[CONF_COMFORT_TEMP]) - DEFAULT_BASE_OFFSET
+
+
+def zone_floor(z: ZoneRuntime, when: datetime) -> float:
+    """Effective lower bound for the planner: comfort − band in comfort time, otherwise the base temperature."""
+    low = zone_comfort(z, when)
+    return low if low is not None else zone_base(z)
+
+
+def zone_quiet(z: ZoneRuntime, when: datetime, lead: timedelta = timedelta(0)) -> bool:
+    """Inside the zone's quiet time (no thermostat writes); ``lead`` looks ahead (set the floor in time)."""
+    start, end = z.cfg.get(CONF_QUIET_FROM), z.cfg.get(CONF_QUIET_TO)
+    if not start or not end:
+        return False
+    return _in_window(dt_util.as_local(when + lead), _parse_time(start), _parse_time(end))
+
+
+def zone_charge_cap(z: ZoneRuntime, when: datetime) -> float | None:
+    """Where the zone's thermostat closes during a block: the upper bound, in quiet time the base temperature.
+    None = no thermostat control (the zone takes what it gets)."""
+    if not z.cfg.get(CONF_BT_CONTROL):
+        return None
+    return zone_base(z) if zone_quiet(z, when) else zone_high(z)
+
+
 def build_plan_inputs(
     hass: HomeAssistant, zones: dict[str, ZoneRuntime], fc: Forecast, idx0: int, horizon: int
 ) -> list[ZonePlanInput]:
@@ -225,14 +268,24 @@ def build_plan_inputs(
             )
             for h in range(horizon)
         ]
+        ends = [fc.times[idx0 + 1 + h] for h in range(horizon)]  # prediction h = end of hour h
+        starts = [fc.times[idx0 + h] for h in range(horizon)]  # heat input of hour h
+        high = zone_high(z)
         inputs.append(
             ZonePlanInput(
                 name=sid, model=z.model, temp_now=temp, future=future,
-                comfort_low=[zone_comfort(z, fc.times[idx0 + 1 + h]) for h in range(horizon)],
+                comfort_low=[zone_floor(z, t) for t in ends],
+                comfort_high=[high] * horizon,
+                charge_cap=[zone_charge_cap(z, t) for t in starts],
                 q_on=z.q_on, leads_release=bool(z.cfg.get(CONF_LEADS_RELEASE, True)), std_scale=z.std_scale,
             )
         )
     return inputs
+
+
+def starts_weight(options: dict[str, Any]) -> float:
+    """The starts-vs-gas option (0…100) as planner weight 0…1."""
+    return float(options.get(CONF_STARTS_WEIGHT, DEFAULT_STARTS_WEIGHT)) / 100.0
 
 
 class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
@@ -628,8 +681,12 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
         zval = float(self.config_entry.options.get(CONF_CONFIDENCE_Z, DEFAULT_CONFIDENCE_Z))
         lengths = block_lengths_for(float(self.config_entry.options.get(CONF_MIN_BLOCK_H, DEFAULT_MIN_BLOCK_H)))
         # numpy work off the event loop
+        running = self.actuator.commanded if self.control_enabled else self.view_builder.shadow_on
         result: PlanResult = await self.hass.async_add_executor_job(
-            partial(plan, inputs, block_lengths=lengths, z=zval)
+            partial(
+                plan, inputs, block_lengths=lengths, z=zval, cost_fn=charge_cost(starts_weight(self.config_entry.options)),
+                running=bool(running),
+            )
         )
         for zi in inputs:
             pred = result.free_run[zi.name]

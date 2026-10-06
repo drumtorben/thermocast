@@ -29,6 +29,8 @@ CONF_MAX_SWITCHES = "max_switches_per_day"
 CONF_FORGETTING = "forgetting_factor"
 CONF_CONFIDENCE_Z = "confidence_z"
 CONF_CALIBRATE_SIGMA = "calibrate_sigma"  # widen σ from the observed forecast errors
+CONF_STARTS_WEIGHT = "starts_weight"  # 0 = little gas … 100 = few burner starts
+DEFAULT_STARTS_WEIGHT = 80
 
 DEFAULT_MIN_BLOCK_H = 3
 DEFAULT_MIN_PAUSE_H = 2
@@ -52,6 +54,17 @@ CONF_SURFACES = "surfaces"
 CONF_NEIGHBOR_SENSORS = "neighbor_sensors"
 CONF_GAIN_ENTITIES = "gain_entities"
 CONF_WINDOW_ENTITIES = "window_entities"
+
+# charge and coast (see docs/superpowers/specs/2026-10-06-charge-and-coast-design.md)
+CONF_COMFORT_HIGH = "comfort_high"  # upper bound: a block may charge the zone up to here
+CONF_BASE_TEMP = "base_temp"  # lower bound outside comfort time (night/away)
+CONF_BT_CONTROL = "bt_control"  # Thermocast sets the Better Thermostat target of this zone
+CONF_BT_ENTITY = "bt_entity"  # the Better Thermostat climate entity
+CONF_QUIET_FROM = "quiet_from"  # no thermostat writes (valve noise) from …
+CONF_QUIET_TO = "quiet_to"  # … until
+DEFAULT_HIGH_OFFSET = 1.0  # K above comfort
+DEFAULT_BASE_OFFSET = 2.0  # K below comfort
+QUIET_LEAD = timedelta(minutes=15)  # set the floor this long before the quiet time starts
 
 HEAT_TYPES = ["fbh", "radiator"]
 DEFAULT_Q_ON = 10.0  # K, initial guess of the heating proxy while heating

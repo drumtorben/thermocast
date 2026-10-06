@@ -31,6 +31,7 @@ from .const import (
 )
 from .core.explain import PlanSnapshot, plan_change, snapshot_from
 from .core.model import Prediction
+from .core.planner import charge_cost
 from .core.quality import hindcast
 from .core.rollout import ActuatorState, block_lengths_for
 from .core.rules import apply_rules, binary_value, release_state
@@ -63,6 +64,11 @@ class ViewBuilder:
         self._shadow_change: datetime | None = None
         self._shadow_switches = 0
         self._shadow_day = None
+
+    @property
+    def shadow_on(self) -> bool:
+        """Observe mode: would the release be on now (same rules as the real actuator)?"""
+        return self._shadow_on
 
     def mark_unloaded(self) -> None:
         self.view = {"error": "unloaded"}
@@ -147,7 +153,7 @@ class ViewBuilder:
         return st.name if st else entity_id
 
     async def _async_build(self, now: datetime, hour0: datetime, data: ThermocastData) -> dict[str, Any]:
-        from .coordinator import build_plan_inputs, zone_comfort
+        from .coordinator import build_plan_inputs, starts_weight, zone_comfort
 
         c = self._c
         hass = c.hass
@@ -228,7 +234,7 @@ class ViewBuilder:
                 outlook = await hass.async_add_executor_job(
                     partial(
                         compute_outlook, inputs, steps, c.actuator.rules, state, day_index, hour0,
-                        z=zval, block_lengths=lengths,
+                        z=zval, block_lengths=lengths, cost_fn=charge_cost(starts_weight(c.config_entry.options)),
                     )
                 )
                 snap = snapshot_from(outlook.rollout.first, outlook.first_inputs, hour0)

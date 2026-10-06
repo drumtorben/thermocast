@@ -20,9 +20,13 @@ from homeassistant.helpers import selector
 from .const import (
     CONF_ACTIVE_FROM,
     CONF_ACTIVE_TO,
+    CONF_BASE_TEMP,
+    CONF_BT_CONTROL,
+    CONF_BT_ENTITY,
     CONF_BURNER_STARTS,
     CONF_CALIBRATE_SIGMA,
     CONF_COMFORT_BAND,
+    CONF_COMFORT_HIGH,
     CONF_COMFORT_SCHEDULE,
     CONF_COMFORT_TEMP,
     CONF_CONFIDENCE_Z,
@@ -39,19 +43,25 @@ from .const import (
     CONF_MIN_PAUSE_H,
     CONF_NEIGHBOR_SENSORS,
     CONF_OUTDOOR_SENSOR,
+    CONF_QUIET_FROM,
+    CONF_QUIET_TO,
     CONF_RELEASE_ENTITY,
     CONF_RELEASE_OFF,
     CONF_RELEASE_ON,
+    CONF_STARTS_WEIGHT,
     CONF_SURFACES,
     CONF_TEMP_SENSORS,
     CONF_VALVE_ENTITY,
     CONF_WINDOW_ENTITIES,
+    DEFAULT_BASE_OFFSET,
     DEFAULT_CALIBRATE_SIGMA,
     DEFAULT_CONFIDENCE_Z,
     DEFAULT_FORGETTING,
+    DEFAULT_HIGH_OFFSET,
     DEFAULT_MAX_SWITCHES,
     DEFAULT_MIN_BLOCK_H,
     DEFAULT_MIN_PAUSE_H,
+    DEFAULT_STARTS_WEIGHT,
     DOMAIN,
     HEAT_TYPES,
     SUBENTRY_ZONE,
@@ -109,6 +119,11 @@ def _options_schema(options: dict[str, Any]) -> vol.Schema:
             vol.Required(
                 CONF_CALIBRATE_SIGMA, default=options.get(CONF_CALIBRATE_SIGMA, DEFAULT_CALIBRATE_SIGMA)
             ): selector.BooleanSelector(),
+            vol.Required(
+                CONF_STARTS_WEIGHT, default=options.get(CONF_STARTS_WEIGHT, DEFAULT_STARTS_WEIGHT)
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=0, max=100, step=5, mode=selector.NumberSelectorMode.SLIDER)
+            ),
             # optional sources for the panel (DHW hatching, KPIs) – suggested, so they can be cleared
             vol.Optional(CONF_DHW_ENTITY): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain=["binary_sensor", "switch", "sensor"])
@@ -140,6 +155,13 @@ def _zone_schema() -> vol.Schema:
             vol.Required(CONF_ACTIVE_TO, default="22:00:00"): selector.TimeSelector(),
             vol.Optional(CONF_COMFORT_SCHEDULE): selector.EntitySelector(selector.EntitySelectorConfig(domain="schedule")),
             vol.Required(CONF_LEADS_RELEASE, default=True): selector.BooleanSelector(),
+            # charge and coast: optional – without them comfort + 1 K / comfort − 2 K apply
+            vol.Optional(CONF_COMFORT_HIGH): _number(12, 26, 0.1, "°C"),
+            vol.Optional(CONF_BASE_TEMP): _number(10, 24, 0.1, "°C"),
+            vol.Optional(CONF_BT_CONTROL, default=False): selector.BooleanSelector(),
+            vol.Optional(CONF_BT_ENTITY): selector.EntitySelector(selector.EntitySelectorConfig(domain="climate")),
+            vol.Optional(CONF_QUIET_FROM): selector.TimeSelector(),
+            vol.Optional(CONF_QUIET_TO): selector.TimeSelector(),
             vol.Optional(CONF_SURFACES, default=[]): selector.ObjectSelector(),
             vol.Optional(CONF_NEIGHBOR_SENSORS, default=[]): _temp_sensor(multiple=True),
             vol.Optional(CONF_GAIN_ENTITIES, default=[]): selector.EntitySelector(
@@ -290,7 +312,11 @@ class ZoneSubentryFlow(ConfigSubentryFlow):
             if not errors:
                 title = data.pop(CONF_NAME)
                 return self.async_update_and_abort(self._get_entry(), subentry, title=title, data=data)
-        schema = self.add_suggested_values_to_schema(_zone_schema(), {**subentry.data, CONF_NAME: subentry.title})
+        comfort = float(subentry.data[CONF_COMFORT_TEMP])
+        defaults = {CONF_COMFORT_HIGH: comfort + DEFAULT_HIGH_OFFSET, CONF_BASE_TEMP: comfort - DEFAULT_BASE_OFFSET}
+        schema = self.add_suggested_values_to_schema(
+            _zone_schema(), {**defaults, **subentry.data, CONF_NAME: subentry.title}
+        )
         return self.async_show_form(step_id="reconfigure", data_schema=schema, errors=errors)
 
     @staticmethod
@@ -303,4 +329,14 @@ class ZoneSubentryFlow(ConfigSubentryFlow):
             errors[CONF_SURFACES] = "invalid_surfaces"
         if data.get(CONF_HEAT_TYPE) == "fbh" and data.get(CONF_VALVE_ENTITY):
             errors[CONF_VALVE_ENTITY] = "valve_only_radiator"
+        if data.get(CONF_BT_CONTROL) and not data.get(CONF_BT_ENTITY):
+            errors[CONF_BT_ENTITY] = "bt_entity_missing"
+        comfort = float(data[CONF_COMFORT_TEMP])
+        low = comfort - float(data[CONF_COMFORT_BAND])
+        high = float(data.get(CONF_COMFORT_HIGH) or comfort + DEFAULT_HIGH_OFFSET)
+        base = float(data.get(CONF_BASE_TEMP) or comfort - DEFAULT_BASE_OFFSET)
+        if not base <= low or not high > comfort:
+            errors["base"] = "invalid_bounds"
+        if bool(data.get(CONF_QUIET_FROM)) != bool(data.get(CONF_QUIET_TO)):
+            errors[CONF_QUIET_TO] = "quiet_incomplete"
         return data, errors

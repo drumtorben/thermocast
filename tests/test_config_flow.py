@@ -187,7 +187,7 @@ async def test_options_flow(hass: HomeAssistant, mock_entry: MockConfigEntry, mo
     }
     result = await hass.config_entries.options.async_configure(result["flow_id"], options)
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert mock_entry.options == {**options, CONF_CALIBRATE_SIGMA: True}
+    assert mock_entry.options == {**options, CONF_CALIBRATE_SIGMA: True, "starts_weight": 80}
 
 
 async def test_options_flow_panel_sources(hass: HomeAssistant, mock_entry: MockConfigEntry, mock_open_meteo) -> None:
@@ -201,14 +201,14 @@ async def test_options_flow_panel_sources(hass: HomeAssistant, mock_entry: MockC
     }
     result = await hass.config_entries.options.async_init(mock_entry.entry_id)
     result = await hass.config_entries.options.async_configure(result["flow_id"], {**base, **sources})
-    assert mock_entry.options == {**base, **sources, CONF_CALIBRATE_SIGMA: True}
+    assert mock_entry.options == {**base, **sources, CONF_CALIBRATE_SIGMA: True, "starts_weight": 80}
 
     # the form suggests the stored entities and they can be removed again
     result = await hass.config_entries.options.async_init(mock_entry.entry_id)
     keys = {str(k): k for k in result["data_schema"].schema}
     assert keys[CONF_BURNER_STARTS].description == {"suggested_value": "sensor.burner_starts"}
     result = await hass.config_entries.options.async_configure(result["flow_id"], base)
-    assert mock_entry.options == {**base, CONF_CALIBRATE_SIGMA: True}
+    assert mock_entry.options == {**base, CONF_CALIBRATE_SIGMA: True, "starts_weight": 80}
 
 
 async def test_zone_subentry_create(hass: HomeAssistant, mock_entry: MockConfigEntry, mock_open_meteo) -> None:
