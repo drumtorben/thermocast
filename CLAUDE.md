@@ -221,6 +221,9 @@ Attr. Parameter + Sonnenantwort je Fläche).
 6. Kurvenanhebung während eines Blocks (Estrich gezielt laden); Anwesenheit (`zone.home`) im Komfort.
 7. Steuerung aktivieren; Erfolg im KPI-Tab (vorher/nachher) ablesen.
 8. Wärmepumpen-Kostenfunktion (EPEX, PV, COP) vorbereiten.
+9. Gewinn-Prognose nach Tagesprofil (typischer Wert je Stunde, evtl. je Wochentag, aus dem Stunden-Log) statt
+   konstant fortgeschrieben – erst danach ein Hausstrom-Signal (Gesamtleistung) als innerer Gewinn sinnvoll
+   (sonst schreibt der Planer z. B. eine Ofen-Spitze für 72 h fort).
 
 ---
 
