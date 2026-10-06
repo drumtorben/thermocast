@@ -109,6 +109,21 @@ async def test_update_error_holds_the_lower_bound(hass: HomeAssistant, mock_entr
     assert len(calls) == n + 1 and calls[-1].data["temperature"] == 20.0
 
 
+async def test_thermostat_late_after_start_is_picked_up_within_a_minute(
+    hass: HomeAssistant, mock_entry, mock_open_meteo, freezer
+) -> None:
+    """Better Thermostat loads after Thermocast on an HA start – check again soon, not after 15 min."""
+    calls = await _setup(hass, mock_entry, freezer)
+    hass.states.async_set(BT, "unavailable", {})
+    coordinator = mock_entry.runtime_data
+    await coordinator.async_set_control(True)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert coordinator.data.bt["zone_eg"]["reason"] == "unavailable"
+    hass.states.async_set(BT, "heat", {"temperature": 19.0})
+    await _tick(hass, freezer, minutes=1)
+    assert coordinator.data.bt["zone_eg"]["reason"] != "unavailable" and calls
+
+
 async def test_unavailable_thermostat_is_left_alone(hass: HomeAssistant, mock_entry, mock_open_meteo, freezer) -> None:
     calls = await _setup(hass, mock_entry, freezer)
     hass.states.async_set(BT, "unavailable", {})

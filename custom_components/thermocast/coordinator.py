@@ -595,7 +595,6 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
             # sensors/forecast not back yet after a start: keep the stored state, look again in a minute
             failsafe = None
             result["want_heat"] = bool(self.actuator.commanded)
-        self.update_interval = STARTUP_RECHECK if holding else UPDATE_INTERVAL
         if failsafe and not self._failsafe_active:
             self.events.add(now, "failsafe_start", detail=failsafe)
             self._failsafe_since = now
@@ -613,6 +612,9 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
             self.zones, self.zone_temps(), block_on=release, failsafe=bool(failsafe), enabled=self.control_enabled,
             now=now, block_end=result["block_end"],
         )
+        # a thermostat still missing right after a start (Better Thermostat loads late): look again in a minute
+        waiting = any(b.get("reason") == "unavailable" for b in bt.values()) and now - self._started < STARTUP_GRACE
+        self.update_interval = STARTUP_RECHECK if holding or waiting else UPDATE_INTERVAL
         age = (now - self.forecast.fetched_at).total_seconds() / 60 if self.forecast and self.forecast.fetched_at else None
         self._schedule_save(logs=hour_closed)  # debounced; also keeps the running hour across restarts
         data_out = ThermocastData(
