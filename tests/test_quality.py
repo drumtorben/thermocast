@@ -21,12 +21,25 @@ from core.quality import (
     hindcast_metrics,
     interpret,
     measured_by_hour,
+    merge_logs,
     one_step_metrics,
     param_snapshot,
 )
 
 TZ = ZoneInfo("Europe/Berlin")
 T0 = datetime(2026, 10, 1, 22, tzinfo=UTC)  # 02.10. 00:00 local
+
+
+def test_merge_logs_keeps_live_hours_after_the_history():
+    """A warm start at 19:23 rebuilds the log up to 17:00 – the live 18:00 hour must survive."""
+    h = [(T0 + timedelta(hours=i)).isoformat() for i in range(4)]
+    history = [{"t": h[0], "src": "warm"}, {"t": h[1], "src": "warm"}]
+    live = [{"t": h[0], "src": "live"}, {"t": h[1], "src": "live"}, {"t": h[2], "src": "live"}]
+    merged = merge_logs(history, live)
+    assert [e["t"] for e in merged] == h[:3]
+    assert [e["src"] for e in merged] == ["warm", "warm", "live"]
+    assert merge_logs([], live) == live
+    assert merge_logs(history, []) == history
 
 
 def _entries(sim, start: int, hours: int, t0: datetime = T0) -> list[dict]:

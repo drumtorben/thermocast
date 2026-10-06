@@ -47,6 +47,15 @@ class RingLog:
         return len(self._items)
 
 
+def merge_logs(history: list[dict[str, Any]], live: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Hour log rebuilt from history, plus the live hours after its last entry (a warm start cannot build
+    the last closed hour yet – its successor is still running)."""
+    if not history:
+        return list(live)
+    last = datetime.fromisoformat(history[-1]["t"])
+    return [*history, *(e for e in live if datetime.fromisoformat(e["t"]) > last)]
+
+
 class ForecastLog:
     """Operational predictions per issue hour: horizon k -> (mean, std) for the start of hour issue + k."""
 

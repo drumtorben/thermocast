@@ -25,6 +25,7 @@ from .const import (
 )
 from .core.forecast import fetch_forecast
 from .core.model import OnlineZoneModel
+from .core.quality import merge_logs
 from .core.rules import binary_value, hvac_heating
 from .core.series import hourly_fraction, hourly_mean, mask_off
 from .core.view import align
@@ -141,7 +142,7 @@ async def async_warmstart(coordinator: ThermocastCoordinator, only_fresh: bool) 
             result[sid] = 0
             continue
         z.model = res.model
-        z.log.load(res.log)
+        z.log.load(merge_logs(res.log, z.log.to_list()))
         z.params = res.params
         if res.q_on is not None:
             z.q_on = res.q_on
