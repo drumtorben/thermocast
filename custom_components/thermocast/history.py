@@ -30,6 +30,35 @@ async def async_fetch_states(
     return _to_series(raw)
 
 
+async def async_fetch_attribute(
+    hass: HomeAssistant, entity_ids: Iterable[str], attribute: str, start: datetime, end: datetime
+) -> dict[str, StateSeries] | None:
+    """Changes of one attribute per entity (e.g. a thermostat's ``hvac_action``). None if there is no recorder."""
+    if "recorder" not in hass.config.components:
+        return None
+    ids = sorted({e for e in entity_ids if e})
+    if not ids:
+        return {}
+    from homeassistant.components.recorder import get_instance, history
+
+    def _query():
+        return history.get_significant_states(
+            hass, start, end, entity_ids=ids, significant_changes_only=False, minimal_response=False,
+            no_attributes=False,
+        )
+
+    raw = await get_instance(hass).async_add_executor_job(_query)
+    out: dict[str, StateSeries] = {}
+    for eid, states in raw.items():
+        series: StateSeries = []
+        for st in states:
+            value = str(st.attributes.get(attribute, ""))
+            if not series or series[-1][1] != value:
+                series.append((st.last_updated, value))
+        out[eid] = series
+    return out
+
+
 async def async_fetch_statistics(
     hass: HomeAssistant, statistic_ids: Iterable[str], start: datetime, end: datetime, types: set[str]
 ) -> dict[str, dict[datetime, dict[str, float]]] | None:

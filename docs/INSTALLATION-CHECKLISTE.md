@@ -15,7 +15,7 @@ sind typische EMS-ESP-Namen und **nur Beispiele** – in *Entwicklerwerkzeuge �
 | Heizungspumpe | `binary_sensor.boiler_heating_pump` | an/aus passt zum Heizbetrieb (nicht zur WW-Ladung) |
 | **Freigabe** | `number.thermostat_hc1_summer_temperature` (RC310 Sommer/Winter-Schwelle) | siehe 2. |
 | Raumtemperaturen | Wohnzimmer, Küche, Schlafräume | `state_class: measurement` (für Warmstart/KPIs) |
-| Ventilöffnung (TRVZB) | `sensor.<trv>_valve_opening_degree` | 0–100 % |
+| Ventil (TRV) | `climate.<trv>` (das Thermostat selbst, nicht Better Thermostat) | `hvac_action` wechselt zwischen `heating` und `idle`; **nicht** `valve_opening_degree` (nur eine eingestellte Grenze) |
 | Brennerstarts | `sensor.boiler_burner_starts` | `state_class: total_increasing` |
 | Heizenergie | `sensor.boiler_energy_heating` | kWh, `total_increasing` |
 | Warmwasser aktiv | `binary_sensor.boiler_dhw_charging` | an während WW-Ladung |
@@ -39,7 +39,8 @@ Eine Zone = ein Raum oder eine Gruppe von Räumen am selben Heizkreis. Faustrege
 
 - **Fußbodenheizung ohne Stellantriebe** (z. B. ein ganzes Geschoss): **eine** Zone, Typ Fußbodenheizung,
   Sensor des wichtigsten Raums (Wohnzimmer), **führt**.
-- **Heizkörper mit TRV:** je Raum eine Zone, Typ Heizkörper, Ventilöffnung als Ventil-Entität.
+- **Heizkörper mit TRV:** je Raum eine Zone, Typ Heizkörper, das TRV-Thermostat (`climate`) als Ventil-Entität –
+  ohne Ventil-Entität zählt jede Pumpenlaufzeit als Heizen im Raum.
 - **Flächen** je Zone: alle Fenster, Türen mit viel Glas und Dachflächen mit Ausrichtung und Neigung; mehrere
   Fenster gleicher Ausrichtung als **eine** Fläche (die Wirkung wird gelernt). Dachüberstände, Balkone usw.
   nicht eintragen – sie verkleinern nur den gelernten Sonnenwert.

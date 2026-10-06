@@ -213,6 +213,39 @@ async def test_dhw_charging_is_not_space_heating(hass: HomeAssistant, mock_entry
     assert z.log.to_list()[-1]["rec"]["q"] > 40
 
 
+async def test_radiator_heats_only_while_its_thermostat_heats(
+    hass: HomeAssistant, mock_entry, mock_open_meteo, freezer
+) -> None:
+    """TRVs report no valve position – the thermostat's hvac_action decides whether the radiator gets heat."""
+    from custom_components.thermocast.const import CONF_HEAT_TYPE, CONF_VALVE_ENTITY
+
+    freezer.move_to("2026-10-04 10:05:00+00:00")
+    mock_open_meteo(5.0)
+    await _setup_states(hass)
+    hass.states.async_set("binary_sensor.heating_pump", "on")
+    hass.states.async_set("sensor.flow", "45.0", {"device_class": "temperature"})
+    hass.states.async_set("climate.trv", "heat", {"hvac_action": "idle"})
+    mock_entry.add_to_hass(hass)
+    hass.config_entries.async_update_subentry(
+        mock_entry, mock_entry.subentries["zone_eg"],
+        data={**mock_entry.subentries["zone_eg"].data, CONF_HEAT_TYPE: "radiator", CONF_VALVE_ENTITY: "climate.trv"},
+    )
+    assert await hass.config_entries.async_setup(mock_entry.entry_id)
+    await hass.async_block_till_done()
+
+    hass.states.async_set("climate.trv", "heat", {"hvac_action": "heating"})
+    freezer.move_to("2026-10-04 11:05:00+00:00")
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    z = mock_entry.runtime_data.zones["zone_eg"]
+    assert z.log.to_list()[0]["rec"]["q"] == 0.0  # pump ran, but the valve stayed closed
+
+    freezer.move_to("2026-10-04 12:05:00+00:00")
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert z.log.to_list()[-1]["rec"]["q"] == pytest.approx(45.0 - 20.4)
+
+
 async def test_hour_close_learns_and_persists(
     hass: HomeAssistant, mock_entry, mock_open_meteo, freezer, hass_storage
 ) -> None:

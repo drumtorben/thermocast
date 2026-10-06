@@ -50,6 +50,19 @@ def release_state(value: str | None, domain: str, on_value: str | None, off_valu
     return value == "on"
 
 
+def hvac_heating(action: str | None) -> float | None:
+    """``hvac_action`` of a thermostat -> 1.0 while its valve heats, 0.0 otherwise, None if unknown.
+
+    Used as the radiator valve signal: TRVs like the Sonoff TRVZB report no real valve position
+    (``valve_opening_degree`` is only a configured limit), but they do report whether they are heating.
+    """
+    if action in ("heating", "preheating"):
+        return 1.0
+    if action in ("idle", "off", "cooling", "drying", "fan", "defrosting"):
+        return 0.0
+    return None
+
+
 _ON = frozenset({"on", "true", "an", "ein", "yes", "ja"})
 _OFF = frozenset({"off", "false", "aus", "no", "nein"})
 

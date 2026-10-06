@@ -61,7 +61,7 @@
             "name": "Name",
             "heat_type": "Heizungsart",
             "temp_sensors": "Temperatursensoren",
-            "valve_entity": "Ventilöffnung (Heizkörper)",
+            "valve_entity": "Ventil / Thermostat (Heizkörper)",
             "comfort_temp": "Komforttemperatur",
             "comfort_band": "Erlaubte Unterschreitung",
             "active_from": "Komfort ab",
@@ -76,7 +76,7 @@
           "data_description": {
             "surfaces": "YAML-Liste, z. B. [{kind: window, azimuth: 90, tilt: 90}, {kind: roof, azimuth: 180, tilt: 40}]. Azimut: 0=N, 90=O, 180=S, 270=W.",
             "leads_release": "Wenn an, entscheidet der Komfort dieser Zone, wann der Kessel heizen darf.",
-            "valve_entity": "Nur für Heizkörper: Sensor der Ventilöffnung in % des TRV.",
+            "valve_entity": "Nur für Heizkörper. Am besten das Thermostat des TRV selbst (climate) – sein Zustand heizt/inaktiv wird genutzt. Ein Sensor mit der echten Ventilöffnung in % geht auch. Keine eingestellte Grenze wie valve_opening_degree.",
             "gain_entities": "Leistungssensoren (W), Anwesenheit oder Ein/Aus-Entitäten, die Wärme liefern.",
             "neighbor_sensors": "Temperaturen angrenzender Räume (der Wärmeaustausch wird gelernt).",
             "comfort_schedule": "Ein Zeitplan-Helfer (z. B. werktags 8–17 Uhr fürs Büro). Wenn gesetzt, ersetzt er „Komfort von/bis“."
@@ -88,7 +88,7 @@
             "name": "Name",
             "heat_type": "Heizungsart",
             "temp_sensors": "Temperatursensoren",
-            "valve_entity": "Ventilöffnung (Heizkörper)",
+            "valve_entity": "Ventil / Thermostat (Heizkörper)",
             "comfort_temp": "Komforttemperatur",
             "comfort_band": "Erlaubte Unterschreitung",
             "active_from": "Komfort ab",
@@ -103,7 +103,7 @@
           "data_description": {
             "surfaces": "YAML-Liste, z. B. [{kind: window, azimuth: 90, tilt: 90}, {kind: roof, azimuth: 180, tilt: 40}]. Azimut: 0=N, 90=O, 180=S, 270=W.",
             "leads_release": "Wenn an, entscheidet der Komfort dieser Zone, wann der Kessel heizen darf.",
-            "valve_entity": "Nur für Heizkörper: Sensor der Ventilöffnung in % des TRV.",
+            "valve_entity": "Nur für Heizkörper. Am besten das Thermostat des TRV selbst (climate) – sein Zustand heizt/inaktiv wird genutzt. Ein Sensor mit der echten Ventilöffnung in % geht auch. Keine eingestellte Grenze wie valve_opening_degree.",
             "gain_entities": "Leistungssensoren (W), Anwesenheit oder Ein/Aus-Entitäten, die Wärme liefern.",
             "neighbor_sensors": "Temperaturen angrenzender Räume (der Wärmeaustausch wird gelernt).",
             "comfort_schedule": "Ein Zeitplan-Helfer (z. B. werktags 8–17 Uhr fürs Büro). Wenn gesetzt, ersetzt er „Komfort von/bis“."

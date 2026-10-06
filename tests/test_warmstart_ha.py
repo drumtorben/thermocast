@@ -84,6 +84,20 @@ async def test_new_zone_learns_from_history(hass: HomeAssistant, mock_entry: Moc
     assert 0 < zr.model.n_updates <= before + 1
 
 
+async def test_thermostat_hvac_action_history(hass: HomeAssistant) -> None:
+    """Radiator valve signal for the warm start: the TRV's hvac_action, read from the recorder."""
+    from custom_components.thermocast.history import async_fetch_attribute
+
+    start = dt_util.utcnow() - timedelta(minutes=1)
+    hass.states.async_set("climate.trv", "heat", {"hvac_action": "idle", "current_temperature": 20.0})
+    await async_wait_recording_done(hass)
+    hass.states.async_set("climate.trv", "heat", {"hvac_action": "idle", "current_temperature": 20.1})  # no change
+    hass.states.async_set("climate.trv", "heat", {"hvac_action": "heating", "current_temperature": 20.1})
+    await async_wait_recording_done(hass)
+    series = await async_fetch_attribute(hass, ["climate.trv"], "hvac_action", start, dt_util.utcnow())
+    assert [v for _, v in series["climate.trv"]] == ["idle", "heating"]
+
+
 async def test_without_history_the_prior_stays(hass: HomeAssistant, mock_entry: MockConfigEntry, history) -> None:
     await _setup_states(hass)
     await _setup_entry(hass, mock_entry)

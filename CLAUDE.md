@@ -98,7 +98,9 @@ T[t+1] − T[t] = b0 + a·(T_out − T)
 
 - `I_s`: Open-Meteo GTI für die Ausrichtung der Fläche (Kompass-Azimut → Open-Meteo: 0=S, −90=O).
   Fläche × g-Wert × Verschattung steckt im gelernten Koeffizienten.
-- `Q` (Heiz-Proxy): `max(0, Vorlauf − T_raum)` solange Heizungspumpe läuft; Heizkörper × Ventil-%.
+- `Q` (Heiz-Proxy): `max(0, Vorlauf − T_raum)` solange Heizungspumpe läuft und keine WW-Ladung (Option);
+  Heizkörper × Ventilanteil – bevorzugt `hvac_action` des TRV-Thermostats (heating/idle), denn der TRVZB
+  meldet keine echte Ventilstellung (`valve_opening_degree` ist nur eine Grenze).
 - RLS: Vergessensfaktor 0,996/h (~10 Tage), Vorzeichen-Projektion (alles außer Bias ≥ 0),
   Huber-Clipping (3σ), Kovarianz-Deckel (normierte Spur ≤ 50) gegen Wind-up im Sommer.
   Stunden mit offenem Fenster/Datenlücke: nicht lernen, nur Historie fortschreiben.

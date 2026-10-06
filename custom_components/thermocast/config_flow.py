@@ -132,7 +132,7 @@ def _zone_schema() -> vol.Schema:
             ),
             vol.Required(CONF_TEMP_SENSORS): _temp_sensor(multiple=True),
             vol.Optional(CONF_VALVE_ENTITY): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain=["sensor", "number"])
+                selector.EntitySelectorConfig(domain=["climate", "sensor", "number"])
             ),
             vol.Required(CONF_COMFORT_TEMP, default=20.5): _number(10, 26, 0.1, "°C"),
             vol.Required(CONF_COMFORT_BAND, default=0.3): _number(0, 2, 0.1, "K"),

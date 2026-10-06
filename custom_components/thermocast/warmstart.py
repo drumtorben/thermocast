@@ -25,11 +25,11 @@ from .const import (
 )
 from .core.forecast import fetch_forecast
 from .core.model import OnlineZoneModel
-from .core.rules import binary_value
+from .core.rules import binary_value, hvac_heating
 from .core.series import hourly_fraction, hourly_mean, mask_off
 from .core.view import align
 from .core.warmstart import WarmstartInputs, build_records, warm_train
-from .history import async_fetch_states, async_fetch_statistics
+from .history import async_fetch_attribute, async_fetch_states, async_fetch_statistics
 
 if TYPE_CHECKING:
     from .coordinator import ThermocastCoordinator
@@ -63,13 +63,25 @@ async def async_warmstart(coordinator: ThermocastCoordinator, only_fresh: bool) 
     for z in targets.values():
         numeric_ids |= set(z.cfg.get(CONF_TEMP_SENSORS, [])) | set(z.cfg.get(CONF_NEIGHBOR_SENSORS, []))
         numeric_ids |= set(z.cfg.get(CONF_GAIN_ENTITIES, []))
-        if z.cfg.get(CONF_VALVE_ENTITY):
+        if z.cfg.get(CONF_VALVE_ENTITY) and not z.cfg[CONF_VALVE_ENTITY].startswith("climate."):
             numeric_ids.add(z.cfg[CONF_VALVE_ENTITY])
         binary_ids |= set(z.cfg.get(CONF_WINDOW_ENTITIES, []))
 
     stats = await async_fetch_statistics(hass, numeric_ids, start, end, {"mean"}) or {}
     without_stats = {e for e in numeric_ids if not stats.get(e)}  # no state_class -> raw states
     states = await async_fetch_states(hass, without_stats | binary_ids, start, end) or {}
+    thermostats = {
+        z.cfg[CONF_VALVE_ENTITY] for z in targets.values() if str(z.cfg.get(CONF_VALVE_ENTITY, "")).startswith("climate.")
+    }
+    actions = await async_fetch_attribute(hass, thermostats, "hvac_action", start, end) or {}
+
+    def valve(eid: str | None) -> list[float | None] | None:
+        """Valve opening in % per hour: a thermostat's heating share or a numeric opening."""
+        if not eid:
+            return None
+        if eid in thermostats:
+            return [None if f is None else 100.0 * f for f in hourly_fraction(actions.get(eid, []), hours, end, hvac_heating)]
+        return numeric(eid)
 
     def numeric(eid: str | None) -> list[float | None]:
         if not eid:
@@ -115,9 +127,7 @@ async def async_warmstart(coordinator: ThermocastCoordinator, only_fresh: bool) 
             irr={k: align(fc.times, fc.irr[k], hours) for k in keys if fc is not None and k in fc.irr},
             flow=flow,
             heating=heating,
-            valve=numeric(z.cfg.get(CONF_VALVE_ENTITY))
-            if z.cfg.get(CONF_HEAT_TYPE) == "radiator" and z.cfg.get(CONF_VALVE_ENTITY)
-            else None,
+            valve=valve(z.cfg.get(CONF_VALVE_ENTITY)) if z.cfg.get(CONF_HEAT_TYPE) == "radiator" else None,
             neighbors=[numeric(e) for e in z.cfg.get(CONF_NEIGHBOR_SENSORS, [])],
             gains=[numeric(e) for e in z.cfg.get(CONF_GAIN_ENTITIES, [])],
             window=[binary(e) for e in z.cfg.get(CONF_WINDOW_ENTITIES, [])],

@@ -46,6 +46,15 @@ def test_pump_minus_dhw_charging():
     assert mask_off([], dhw, binary_value) == []
 
 
+def test_thermostat_heating_share():
+    from core.rules import hvac_heating
+
+    m = lambda k: T0 + timedelta(minutes=k)
+    actions = [(m(0), "idle"), (m(15), "heating"), (m(30), "idle"), (m(70), "")]
+    assert hourly_fraction(actions, HOURS[:2], T0 + timedelta(hours=2), hvac_heating) == [0.25, 0.0]
+    assert hvac_heating("preheating") == 1.0 and hvac_heating(None) is None
+
+
 def test_gateway_boolean_formats():
     """EMS-ESP publishes booleans as ON/OFF, true/false or (German locale) an/aus."""
     for on in ("on", "ON", "true", "an", "Ein", "1", "2.5"):

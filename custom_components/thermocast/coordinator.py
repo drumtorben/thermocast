@@ -59,7 +59,7 @@ from .core.model import HourRecord, OnlineZoneModel, SurfaceSpec, ZoneSpec
 from .core.planner import PlanResult, ZonePlanInput, plan
 from .core.quality import ForecastLog, RingLog, calibration, measured_by_hour, param_snapshot, std_scale_profile
 from .core.rollout import block_lengths_for
-from .core.rules import binary_value
+from .core.rules import binary_value, hvac_heating
 from .events import EventLog
 from .view_builder import ViewBuilder
 
@@ -88,6 +88,15 @@ def _is_on(hass: HomeAssistant, entity_id: str | None) -> bool | None:
     st = hass.states.get(entity_id) if entity_id else None
     v = binary_value(st.state) if st is not None else None
     return None if v is None else v > 0
+
+
+def _valve_share(hass: HomeAssistant, entity_id: str) -> float | None:
+    """Radiator valve 0..1: a thermostat's ``hvac_action`` (heating/idle) or an opening in %."""
+    if entity_id.startswith("climate."):
+        st = hass.states.get(entity_id)
+        return hvac_heating(st.attributes.get("hvac_action")) if st is not None else None
+    v = _num(hass, entity_id)
+    return None if v is None else min(1.0, max(0.0, v / 100.0))
 
 
 def _or(value: float | None, default: float | None) -> float | None:
@@ -473,8 +482,8 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
             if heating and flow is not None:
                 q = max(0.0, flow - temp)
                 if z.cfg.get(CONF_HEAT_TYPE) == "radiator" and z.cfg.get(CONF_VALVE_ENTITY):
-                    valve = _num(hass, z.cfg[CONF_VALVE_ENTITY])
-                    q *= (valve / 100.0) if valve is not None else 0.0
+                    valve = _valve_share(hass, z.cfg[CONF_VALVE_ENTITY])
+                    q *= valve if valve is not None else 0.0
             z.acc["t_out"].append(t_out)
             z.acc["q"].append(q)
             z.acc["neighbors"].append([_num(hass, e) for e in z.cfg.get(CONF_NEIGHBOR_SENSORS, [])])
