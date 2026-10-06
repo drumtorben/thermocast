@@ -10,7 +10,7 @@ from homeassistant.loader import async_get_integration
 
 from . import panel, websocket_api
 from .const import DOMAIN, PLATFORMS, SUBENTRY_ZONE
-from .coordinator import ThermocastCoordinator
+from .coordinator import RELOADING, ThermocastCoordinator
 
 type ThermocastConfigEntry = ConfigEntry[ThermocastCoordinator]
 
@@ -31,6 +31,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ThermocastConfigEntry) -
         name=entry.title,
         entry_type=dr.DeviceEntryType.SERVICE,
     )
+    hass.data.setdefault(DOMAIN, {}).pop(RELOADING, None)  # a reload flag that found no unload is stale
     coordinator = ThermocastCoordinator(hass, entry)
     coordinator.house_device_id = house.id
     await coordinator.async_load()
@@ -42,7 +43,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ThermocastConfigEntry) -
     # a zone added while this setup was running (e.g. two zones saved quickly) needs another reload
     configured = {sid for sid, sub in entry.subentries.items() if sub.subentry_type == SUBENTRY_ZONE}
     if configured != set(coordinator.zones):
-        hass.config_entries.async_schedule_reload(entry.entry_id)
+        _self_reload(hass, entry)
     elif any(z.model.n_updates == 0 for z in coordinator.zones.values()):
         # new zones learn from the recorder history instead of starting from the prior
         entry.async_create_background_task(
@@ -61,4 +62,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ThermocastConfigEntry) 
 
 async def _async_reload(hass: HomeAssistant, entry: ThermocastConfigEntry) -> None:
     """Options or zones (subentries) changed."""
+    _self_reload(hass, entry)
+
+
+def _self_reload(hass: HomeAssistant, entry: ThermocastConfigEntry) -> None:
+    """Reload after a config change: the unload must not hand the heating back (it would switch the
+    boiler on and off again – EEPROM writes, an extra burner start)."""
+    hass.data.setdefault(DOMAIN, {})[RELOADING] = True
     hass.config_entries.async_schedule_reload(entry.entry_id)

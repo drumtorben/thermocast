@@ -78,6 +78,7 @@ PARAM_HISTORY_DAYS = 30
 SAVE_DELAY_S = 60
 ISSUE_FAILSAFE = "failsafe"
 FAILSAFE_ISSUE_AFTER = timedelta(hours=1)
+RELOADING = "reloading"  # set by the update listener: the next unload is a self-reload, not a removal
 
 
 # --------------------------------------------------------------------- helpers
@@ -483,13 +484,23 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
         return self.view_builder.view
 
     async def async_shutdown_failsafe(self) -> None:
-        if self.control_enabled:
-            await self.actuator.async_force_on()
-            await self.zone_actuator.async_failsafe(self.zones, self.zone_temps())
+        """Unload: hand the heating back – except when Thermocast reloads itself after a config change
+        (the new instance carries on from the stored state; switching the boiler on and off would cost
+        EEPROM writes and a burner start)."""
+        reloading = self.hass.data.get(DOMAIN, {}).pop(RELOADING, False)
+        if self.control_enabled and not reloading:
+            await self._release_everything()
         await self.async_save()
         self.view_builder.mark_unloaded()
         ir.async_delete_issue(self.hass, DOMAIN, ISSUE_FAILSAFE)  # a removed integration has nothing to repair
         self.async_update_listeners()  # open panels re-subscribe
+
+    async def _release_everything(self) -> None:
+        await self.actuator.async_force_on()
+        try:
+            await self.zone_actuator.async_failsafe(self.zones, self.zone_temps())
+        except Exception:
+            _LOGGER.exception("Thermocast: thermostat fail-safe failed")
 
     # ---------------------------------------------------------------- update
     async def _async_update_data(self) -> ThermocastData:

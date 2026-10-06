@@ -110,8 +110,28 @@ async def test_observe_mode_never_writes(hass: HomeAssistant, mock_entry, mock_o
     assert mock_entry.runtime_data.data.override == "observe"
 
 
+async def test_reload_does_not_flip_the_release(hass: HomeAssistant, mock_entry, mock_open_meteo, freezer) -> None:
+    """Every config change reloads the entry – that must not switch the boiler on and off again."""
+    mock_open_meteo(18.0)
+    await _setup_states(hass, temp=22.0)
+    await _setup_entry(hass, mock_entry)
+    switch = _eid(hass, f"{mock_entry.entry_id}_control_enabled", "switch")
+    await hass.services.async_call("switch", "turn_on", {"entity_id": switch}, blocking=True)
+    await hass.async_block_till_done()
+    assert hass.states.get("input_number.summer_threshold").state == "10.0"
+    writes = []
+    hass.bus.async_listen("state_changed", lambda e: e.data["entity_id"] == "input_number.summer_threshold"
+                          and writes.append(e.data["new_state"].state))
+
+    # an options change reloads the entry through the update listener
+    hass.config_entries.async_update_entry(mock_entry, options={**mock_entry.options, "starts_weight": 60})
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert mock_entry.runtime_data.config_entry.options["starts_weight"] == 60  # reloaded
+    assert writes == [] and hass.states.get("input_number.summer_threshold").state == "10.0"
+
+
 async def test_control_blocks_when_warm_and_unload_releases(
-    hass: HomeAssistant, mock_entry, mock_open_meteo
+    hass: HomeAssistant, mock_entry, mock_open_meteo, freezer
 ) -> None:
     mock_open_meteo(18.0)
     await _setup_states(hass, temp=22.0)
@@ -126,7 +146,7 @@ async def test_control_blocks_when_warm_and_unload_releases(
     assert coordinator.data.override is None
     assert coordinator.data.planner_heat is False
 
-    # fail-safe: unloading hands the heating back
+    # fail-safe: unloading (disable / remove) hands the heating back
     assert await hass.config_entries.async_unload(mock_entry.entry_id)
     await hass.async_block_till_done()
     assert hass.states.get("input_number.summer_threshold").state == "16.0"
