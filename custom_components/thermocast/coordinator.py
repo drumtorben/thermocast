@@ -71,6 +71,7 @@ from .core.rollout import block_lengths_for
 from .core.rules import binary_value, hvac_heating
 from .events import EventLog
 from .view_builder import ViewBuilder
+from .zone_actuator import ZoneActuator
 
 _LOGGER = logging.getLogger(__name__)
 PARAM_HISTORY_DAYS = 30
@@ -180,6 +181,7 @@ class ThermocastData:
     forecast_age_min: float | None
     override: str | None = None  # observe | failsafe | min_block | min_pause | budget
     planner_heat: bool | None = None  # raw planner wish (before fail-safe)
+    bt: dict[str, dict[str, Any]] = field(default_factory=dict)  # Better Thermostat target per controlled zone
 
 
 WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
@@ -297,10 +299,11 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
         self.logs_store: Store[dict[str, Any]] = Store(hass, STORAGE_VERSION, f"{DOMAIN}.{entry.entry_id}.logs")
         self.actuator = Actuator(hass, entry)
         self.zones: dict[str, ZoneRuntime] = {}
+        self.events = EventLog()
+        self.zone_actuator = ZoneActuator(hass, self.events)
         self.forecast: Forecast | None = None
         self.control_enabled = False  # observe mode by default
         self.house_device_id: str | None = None  # set in async_setup_entry
-        self.events = EventLog()
         self._failsafe_active = False
         self.view_builder = ViewBuilder(self)
         self.control_since: datetime | None = None
@@ -319,6 +322,7 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
         logs = (await self.logs_store.async_load() or {}).get("zones", {})
         self.control_enabled = bool(stored.get("control_enabled", False))
         self.actuator.load(stored.get("actuator", {}))
+        self.zone_actuator.load(stored.get("bt", {}))
         self.events.load(stored.get("events", []))
         # an open fail-safe from before the restart/reload is closed by the next good update
         last = next((e for e in reversed(self.events.to_list()) if e["type"].startswith("failsafe_")), None)
@@ -400,6 +404,7 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
         return {
             "control_enabled": self.control_enabled,
             "actuator": self.actuator.to_dict(),
+            "bt": self.zone_actuator.to_dict(),
             "events": self.events.to_list(),
             "control_since": self.control_since.isoformat() if self.control_since else None,
             "zones": {
@@ -443,8 +448,12 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
             self.control_since = dt_util.utcnow()  # KPI before/after split
         if not enabled:
             await self.actuator.async_force_on()  # hand control back: heating allowed
+            await self.zone_actuator.async_failsafe(self.zones, self.zone_temps())  # rooms at their lower bound
         await self.async_save()
         await self.async_request_refresh()
+
+    def zone_temps(self) -> dict[str, float | None]:
+        return {sid: _mean([_num(self.hass, e) for e in z.cfg.get(CONF_TEMP_SENSORS, [])]) for sid, z in self.zones.items()}
 
     async def async_warmstart(self, only_fresh: bool) -> dict[str, int]:
         """Learn zone models from recorder history (see warmstart.py). Never raises."""
@@ -474,6 +483,7 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
     async def async_shutdown_failsafe(self) -> None:
         if self.control_enabled:
             await self.actuator.async_force_on()
+            await self.zone_actuator.async_failsafe(self.zones, self.zone_temps())
         await self.async_save()
         self.view_builder.mark_unloaded()
         ir.async_delete_issue(self.hass, DOMAIN, ISSUE_FAILSAFE)  # a removed integration has nothing to repair
@@ -556,6 +566,10 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
         release, override = await self.actuator.async_apply(want_heat, self.control_enabled, now, forced=bool(failsafe))
         if failsafe:
             override = "failsafe"
+        bt = await self.zone_actuator.async_apply(
+            self.zones, self.zone_temps(), block_on=release, failsafe=bool(failsafe), enabled=self.control_enabled,
+            now=now, block_end=result["block_end"],
+        )
         age = (now - self.forecast.fetched_at).total_seconds() / 60 if self.forecast and self.forecast.fetched_at else None
         self._schedule_save(logs=hour_closed)  # debounced; also keeps the running hour across restarts
         data_out = ThermocastData(
@@ -569,6 +583,7 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
             forecast_age_min=age,
             override=override,
             planner_heat=result["want_heat"],
+            bt=bt,
         )
         await self.view_builder.async_refresh(now, data_out)  # never raises
         return data_out
