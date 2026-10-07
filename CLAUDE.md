@@ -56,7 +56,7 @@ custom_components/thermocast/
 │   ├── model.py          # OnlineZoneModel: ARX-Grey-Box + RLS, SurfaceSpec, ZoneSpec, HourRecord
 │   ├── forecast.py       # Open-Meteo: temperature_2m + global_tilted_irradiance je (tilt, azimuth)
 │   ├── planner.py        # Blockplaner: kein Block | Start 0..H × Länge {2,…,12} h, Ober-/Untergrenze,
-│   │                     #   Lade-Deckel (charge_cap), CostFn(cand, K·h kalt, K·h warm, Zehrzeit) → Komponenten
+│   │                     #   Lade-Deckel (charge_cap), CostFn(cand, K·h kalt, K·h warm, Zehrzeit, zu-Anteil) → Komponenten
 │   ├── bt.py             # Better-Thermostat-Sollwert als reine Entscheidung (Laden/Untergrenze/Ruhezeit)
 │   ├── rules.py          # Aktor-Regeln als reine Funktionen (Live-Aktor + Rollout)
 │   ├── rollout.py        # Regler-Rollout bis morgen 24:00 (stündlich planen + Regeln anwenden)
@@ -162,7 +162,7 @@ Attr. Parameter + Sonnenantwort je Fläche).
 
 ---
 
-## 4. Status (v0.1.0)
+## 4. Status (v0.7.1)
 
 - ✅ Kern getestet auf synthetischen Daten: 1-Schritt-MAE ≈ 0,03 K/h, 24-h-Prognose-MAE ≈ 0,1 K,
   Ostfenster und Süddach werden getrennt gelernt, Planer heizt bei −5 °C, nicht bei 18 °C.
@@ -179,7 +179,7 @@ Attr. Parameter + Sonnenantwort je Fläche).
   Befund (synthetisch): ±σ-Abdeckung ab 3 h nur ~45 % → σ der Prognose zu klein (Wetterfehler fehlt).
 - `recorder` ist nur `after_dependencies` (ein kaputter Recorder soll Thermocast nicht blockieren);
   das Panel nutzt ihn optional für die Vergangenheit (`errors: ["no_recorder"]` ohne).
-- Noch nicht mit echten EMS-ESP-Entitäten getestet (Dev-Instanz: `./scripts/develop`).
+- Läuft seit Oktober 2026 an der Referenzinstallation (echte EMS-ESP-Entitäten); Dev-Instanz: `./scripts/develop`.
 - Panel-Interna, die man kennen muss:
   - Story/Zeitachse zeigen den **Rollout**-Block (was passieren wird), die Kandidatentabelle die
     aktuelle Einblock-Wahl des Planers (`explanation.planner_block`) – die können abweichen.
@@ -197,13 +197,18 @@ Attr. Parameter + Sonnenantwort je Fläche).
   Warmstart aus Recorder-Statistik + Open-Meteo-Vergangenheit (automatisch für neue Zonen, Button),
   σ-Kalibrierung je Horizont aus dem Prognose-Log (Option), laufende Stunde übersteht Neustarts,
   zwei Stores (kleiner Zustand debounced, Logs stündlich), Komfort aus `schedule`-Helfer,
-  Diagnose-Download, Repair bei Fail-safe > 1 h, CI-Workflow (nie gelaufen – kein Remote),
+  Diagnose-Download, Repair bei Fail-safe > 1 h, CI-Workflow (GitHub Actions: Tests, hassfest, HACS),
   `docs/INSTALLATION-CHECKLISTE.md`.
 - ✅ v0.4.x (mit echter Anlage): Haus rekonfigurierbar, WW-Ladung aus dem Heiz-Proxy (Option), TRV-`hvac_action`
   als Ventilsignal, Gateway-Boolean-Formate (ON/true/an), Fail-safe ohne Blockpflicht, Ereignisse im Tooltip.
 - ✅ v0.5.0 „Laden & Zehren“ Stufe 1 (Spec/Plan `…2026-10-06-charge-and-coast…`): Ober-/Untergrenze, Zehrzeit-
   Kosten mit Regler, BT-Aktor mit Ruhezeiten, Panel (Obergrenze, BT-Treppe, Ruhezeit, Starts je Block).
   Stufe 2 offen: Lade-Hebel (Vorlauf/Pumpe im Block) – erst nach Test des Hebels an der Anlage.
+- ✅ v0.5.x–v0.7.1 (mit echter Anlage): Neuladen ohne Freigabe-Flip, 5-min-Anlaufphase, Panel-Pfad je Version,
+  KPI Energie/Tag; v0.6: Kosten „wenig Abnehmer“; v0.6.1: Neulernen behält jüngste Live-Stunde (`merge_logs`);
+  v0.7: fensterbewusst (Planer + BT), Blockende vor kurzem Taktsperre-Neustart; v0.7.1: Panel-Feinheiten.
+  Erkenntnis an der Anlage: an milden Tagen liefert die witterungsgeführte Kurve kaum Vorlauf → Fußpunkt anheben
+  (README); längere Fenster-Verzögerungen (0–3 h) getestet und verworfen (MAE minimal schlechter).
 - Bekannte Schwächen:
   - Prognose nutzt aktuelle Nachbartemperaturen/Gains als konstant über den Horizont.
   - Planer kennt nur *einen* Block im Horizont (Rollout plant stündlich neu; die Zehrzeit bewertet den nächsten Start).
@@ -211,22 +216,21 @@ Attr. Parameter + Sonnenantwort je Fläche).
   - Warmstart nutzt Stundenmittel (leicht geglättete ΔT) und für den Heiz-Proxy den Stundenmittel-Vorlauf
     × Pumpen-Anteil – grober als live; der Vergessensfaktor wäscht das in Tagen aus.
   - Keine Anwesenheit (`zone.home`) im Komfort; nur Zeitplan.
-  - Manifest: `codeowners` leer, Doku-URLs Platzhalter (`your-user`) – vor HACS/hassfest setzen.
+  - Sonnen-Zuordnung bei ähnlich verlaufenden Flächen (z. B. Westfenster vs. Norddach) unscharf – das Modell
+    ordnet „tagsüber, verzögert“ der Fläche mit passenden Verzögerungen zu.
 
 ---
 
 ## 5. Nächste Schritte (Priorität)
 
-1. ~~Integration in HA laden, HA-Tests~~ ✅ – Rest: in der echten HA-Instanz installieren.
-2. Zonen anlegen – abgestimmter Zonenplan der Referenzinstallation in `docs/local/zonenplan.md` (nicht im Repo);
-   die allgemeine Anleitung steht in `docs/INSTALLATION-CHECKLISTE.md`.
-3. 2–3 Wochen **nur beobachten**: Panel „Jetzt & Plan“ + „Modell“ (Kalibrierung!) prüfen.
-4. ~~Warmstart aus Recorder-Historie~~ ✅ (v0.4.0) – nach der Installation im Modell-Tab prüfen.
-5. Zwei-Zustands-Modell (Luft + Estrich, Kalman) für die FBH-Zone, falls ARX nicht reicht.
-6. Kurvenanhebung während eines Blocks (Estrich gezielt laden); Anwesenheit (`zone.home`) im Komfort.
-7. Steuerung aktivieren; Erfolg im KPI-Tab (vorher/nachher) ablesen.
-8. Wärmepumpen-Kostenfunktion (EPEX, PV, COP) vorbereiten.
-9. Gewinn-Prognose nach Tagesprofil (typischer Wert je Stunde, evtl. je Wochentag, aus dem Stunden-Log) statt
+1. ~~Installation an der Referenzanlage, Zonen, Steuerung aktiv~~ ✅ (Okt. 2026) – jetzt auswerten: Starts/Tag,
+   kWh/Start, Komfort (KPI-Tab, Tageskarten „Starts je Block“), Modellgüte je Zone.
+2. Zwei-Zustands-Modell (Luft + Speichermasse, Kalman) bzw. τ-geglättetes Sonnensignal, falls ARX nicht reicht.
+3. Kurvenanhebung während eines Blocks (Estrich gezielt laden) – vorerst statisch über den Fußpunkt gelöst.
+4. Anwesenheit (`zone.home`) im Komfort.
+5. Nachbartemperaturen über den Horizont prognostizieren statt konstant.
+6. Wärmepumpen-Kostenfunktion (EPEX, PV, COP) vorbereiten.
+7. Gewinn-Prognose nach Tagesprofil (typischer Wert je Stunde, evtl. je Wochentag, aus dem Stunden-Log) statt
    konstant fortgeschrieben – erst danach ein Hausstrom-Signal (Gesamtleistung) als innerer Gewinn sinnvoll
    (sonst schreibt der Planer z. B. eine Ofen-Spitze für 72 h fort).
 

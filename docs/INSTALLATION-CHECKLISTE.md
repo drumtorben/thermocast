@@ -37,6 +37,15 @@ Empfohlen: **Winter** = Heizen erlaubt, **Auto** = gesperrt, Sommerschwelle fest
       das als „nicht bestätigt“ melden und mit wachsenden Pausen erneut schreiben, max. 40×/Tag).
 - [ ] Danach auf **Auto** lassen.
 
+**Kessel und Regler für Blöcke vorbereiten** (Erfahrungen aus dem Betrieb):
+- [ ] **Heizkurve:** Bei witterungsgeführter Kurve liegt der Soll-Vorlauf an milden Tagen oft kaum über der
+      Raumtemperatur – dann zündet der Brenner im Block nicht. Regelungsart mit Fußpunkt („Basispunkt
+      Außentemp.“) wählen und den Fußpunkt auf ~30–35 °C (bei +20 °C außen) anheben. Kontrolle: Sensor
+      Soll-Vorlauf (`…targetflowtemp`) im Block deutlich über der Raumtemperatur + Einschalthysterese.
+- [ ] **Pumpennachlauf** kurz (z. B. 10 min) und Pumpenoptimierung aus – sonst läuft die Pumpe zwischen den Blöcken.
+- [ ] **Warmwasser-Komfort** (EMS-ESP `select.boiler_dhw_comfort`): bei „Eco“ wurde beobachtet, dass der Kessel
+      während Heizbetrieb nicht nachlädt (Speicher fiel weit unter die Einschaltschwelle); „Heiß“ lädt normal.
+
 ## 3. Installation
 - [ ] `custom_components/thermocast` nach `config/custom_components/` kopieren (später: HACS-Custom-Repo).
 - [ ] HA neu starten → *Einstellungen → Geräte & Dienste → Integration hinzufügen → Thermocast*.
@@ -85,8 +94,12 @@ Eine Zone = ein Raum oder eine Gruppe von Räumen am selben Heizkreis. Faustrege
 ## 5. Optionen (⋮ → Konfigurieren)
 - [ ] Brennerstarts, Heizenergie, Warmwasser aktiv eintragen.
 - [ ] „Unsicherheit kalibrieren“ an lassen (Standard).
-- [ ] Mindestblock 3 h, Mindestpause 2 h, max. 12 Wechsel/Tag sind gute Startwerte.
+- [ ] Mindestblock 2–3 h, Mindestpause 2 h, max. 12 Wechsel/Tag sind gute Startwerte. Der Mindestblock begrenzt
+      nur, wann ein Block frühestens enden darf (geplant wird ab 2 h); 1 h erlaubt frühes Abbrechen, wenn die
+      Räume schon voll sind.
 - [ ] „Wenige Brennerstarts ↔ wenig Gas“: Standard 80 (wenige lange Blöcke). Wirkung im KPI-Tab ablesen.
+- [ ] „Taktsperre des Kessels“: die am Kessel eingestellte Mindestzeit zwischen zwei Starts (z. B. 45 min);
+      braucht den Sensor Brennerstarts (am besten nur Heiz-Starts).
 - [ ] Sicherheitsabstand σ: 1 = vorsichtig, 0 = nur der Mittelwert der Prognose.
 
 ## 6. Plausibilität (Panel → Tab „Modell“)
@@ -112,4 +125,6 @@ Eine Zone = ein Raum oder eine Gruppe von Räumen am selben Heizkreis. Faustrege
 - Integration entfernen/deaktivieren → ebenso.
 - Fällt HA aus, während „gesperrt“ gesetzt ist: das RC310 heizt bei Kälte (< 10 °C gedämpft) von selbst.
   Better Thermostat läuft in HA – die TRVs behalten dann ihren letzten Sollwert.
+- Fenster-Entitäten je Zone eintragen: bei offenem Fenster löst die Zone keinen Block aus und ihr Thermostat bleibt
+  auf dem Grundwert.
 - *Diagnose herunterladen* (⋮ an der Integration) liefert alle Modelle, Logs und Ereignisse für die Analyse.

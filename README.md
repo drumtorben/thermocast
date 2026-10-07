@@ -12,8 +12,9 @@ Vorausschauende Heizfreigabe für Home Assistant – mit **online lernenden Raum
 überdimensionierte Kessel lange und selten statt kurz und oft laufen lässt.
 Ausgelegt für Fußbodenheizung (träger Estrich) + Heizkörper, später Wärmepumpe.
 
-> Status: v0.4 – getestet mit synthetischen Daten und einer lokalen HA-Instanz (120 Tests); noch nicht im
-> Dauerbetrieb an einer echten Heizung. Feedback und Issues willkommen.
+> Status: v0.7 – 184 Tests (synthetisches Testhaus + HA); seit Oktober 2026 im Betrieb an einer echten Anlage
+> (Gas-Brennwertkessel, Buderus RC310 über EMS-ESP, Fußbodenheizung + Heizkörper mit Better Thermostat).
+> Noch jung – Feedback und Issues willkommen.
 > **Startet im Beobachtungsmodus** und schaltet nichts, bis du `Steuerung aktiv` einschaltest.
 
 ## Wie es funktioniert
@@ -21,8 +22,10 @@ Ausgelegt für Fußbodenheizung (träger Estrich) + Heizkörper, später Wärmep
 ```
 alle 15 min:  Sensoren lesen ──► Stunde abgeschlossen? ──► RLS-Update pro Zone (online, kein Neutraining)
               Open-Meteo (stündlich, je Flächenausrichtung) ──► 24-h-Simulation ohne Heizung
-              Planer: kein Block | Start 0..23 h × Länge 2..8 h ──► Kosten (Komfort, Starts, Energie)
-              Aktor: Mindestblock, Mindestpause, Tagesbudget, Fail-safe ──► Freigabe-Entität
+              Planer: kein Block | Start 0..23 h × Länge 2..12 h ──► Kosten (Komfort, zu warm, Starts je Tag,
+                      Energie, wenig Abnehmer)
+              Aktor: Mindestblock, Mindestpause, Tagesbudget, Taktsperre, Fail-safe ──► Freigabe-Entität
+              optional je Zone: Better-Thermostat-Sollwert (Laden im Block, Untergrenze, Ruhezeit, Fenster)
 ```
 
 **Modell pro Zone** (stündlich, linear in den Parametern):
@@ -80,8 +83,20 @@ danach zehren sie von der gespeicherten Wärme bis zur Untergrenze (in der Komfo
 **Grundwert**, Standard Komfort − 2 K). Der Regler **„Wenige Brennerstarts ↔ wenig Gas“** (Optionen, Standard 80)
 gewichtet Starts gegen Blockstunden – beide pro Tag gerechnet, so dass eine längere Ladung, die eine lange Pause
 ermöglicht, sich lohnt. Stunden, in denen die Thermostat-Räume zu sind (an ihrer Grenze oder in der Ruhezeit),
-zählen als zusätzliche Starts – Blöcke landen bevorzugt dort, wo viele Räume gleichzeitig Wärme abnehmen. Optional setzt Thermocast je Zone den Sollwert von **Better Thermostat** (im Block die
-Obergrenze, sonst die Untergrenze), mit **Ruhezeiten** ohne Stellgeräusche und Respekt vor Handeingriffen.
+zählen als zusätzliche Starts – Blöcke landen bevorzugt dort, wo viele Räume gleichzeitig Wärme abnehmen.
+Optional setzt Thermocast je Zone den Sollwert von **Better Thermostat** (im Block die Obergrenze, sonst die
+Untergrenze), mit **Ruhezeiten** (fest und/oder `schedule`-Helfer) ohne Stellgeräusche und Respekt vor Handeingriffen.
+
+- **Offenes Fenster** (Fenster-Entitäten der Zone): die Zone löst keinen Block aus, nimmt im Plan keine Wärme
+  und ihr Thermostat bleibt auf dem Grundwert – gelüftet wird nicht gegen die Heizung. Nach dem Schließen plant
+  der nächste Lauf die Wiederaufheizung.
+- **Taktsperre** (Option, mit Sensor *Brennerstarts*): Würde der Kessel nach seiner Sperrzeit nur noch wenige
+  Minuten vor Blockende neu starten, endet der Block kurz davor – ein Start gespart.
+- **Mindestblock** begrenzt nur, wann ein laufender Block frühestens enden darf; geplant werden Blöcke ab 2 h.
+- **Heizkurve prüfen:** Ein Block heizt nur, wenn der Regler genug Vorlauf verlangt. Mit einer witterungsgeführten
+  Kurve liegt der Soll-Vorlauf an milden Tagen oft kaum über der Raumtemperatur – dann zündet der Brenner im Block
+  gar nicht. Abhilfe: Fußpunkt der Kurve anheben (z. B. ~30–35 °C bei +20 °C außen). Zwischen den Blöcken ist der
+  Heizkreis ohnehin gesperrt, der höhere Fußpunkt wirkt also praktisch nur im Block.
 
 ### Beispiel-Zonen (Flächen als YAML im Feld „Sonnenbeschienene Flächen“)
 
@@ -176,7 +191,9 @@ series:
 * Einschalten der Heizung ist immer erlaubt; Ausschalten nur nach Mindestblock und im Tagesbudget.
 * Fehler im Update, Prognose älter als 2 h, fehlender Sensor einer führenden Zone → Freigabe **an**.
   Dauert ein Fail-safe länger als 1 h, erscheint ein Reparaturhinweis.
-* Entladen/Entfernen der Integration oder Ausschalten der Steuerung → Freigabe **an**.
+* Entladen/Entfernen der Integration oder Ausschalten der Steuerung → Freigabe **an**
+  (ein Neuladen nach einer Konfigurationsänderung nicht). Nach einem HA-Start warten fehlende Sensoren/Prognose
+  bis zu 5 min, bevor der Fail-safe greift (MQTT/Zigbee kommen oft verzögert).
 * **EEPROM-Schutz:** Jeder Schreibvorgang muss von der Entität bestätigt werden. Unbestätigt → neuer Versuch
   erst nach 10 min, dann mit wachsender Pause (30 min … 6 h), Ereignis + Reparaturhinweis. Nie mehr als
   **40 Schreibvorgänge pro Tag**; bei nicht verfügbarer Entität wird gar nicht geschrieben.
@@ -241,10 +258,14 @@ Im Notebook: `sys.path.insert(0, "custom_components/thermocast")`, dann `from co
 - [x] Panel „Gestern · Heute · Morgen“ (Begründung, Plan, Ursachen, Kandidaten)
 - [x] Panel B: Modellgüte (Hindcast, Prognosehorizonte, Kalibrierung, Parameter, JSON-Export, WW-Ladungen)
 - [x] Panel C: KPIs (Brennerstarts/Tag, kWh pro Heizgradtag, Komfort, vorher/nachher)
-- [ ] Warmstart aus der Recorder-Historie beim Einrichten (statt Prior)
-- [ ] Zwei-Zustands-Modell (Luft + Estrich) mit Kalman-Filter für FBH
-- [ ] Zonen-Komfort aus `schedule`-Entität, Anwesenheit (`zone.home`)
+- [x] Warmstart aus der Recorder-Historie beim Einrichten (statt Prior)
+- [x] Zonen-Komfort und Ruhezeiten aus `schedule`-Helfern
+- [x] Diagnostics-Download, Repairs (Fail-safe, EEPROM-Schreibschutz)
+- [x] „Laden & Zehren“: Ober-/Untergrenze, Zehrzeit, Better-Thermostat-Steuerung, Ruhezeiten
+- [x] Blöcke bevorzugt bei vielen offenen Abnehmern; fensterbewusst; Blockende passend zur Taktsperre
+- [ ] Innere Gewinne nach Tagesprofil prognostizieren (dann Hausstrom als Gewinn-Signal)
+- [ ] Anwesenheit (`zone.home`) im Komfort
+- [ ] Zwei-Zustands-Modell (Luft + Speichermasse) bzw. geglättetes Sonnensignal
 - [ ] Kurvenanhebung während eines Blocks (Estrich gezielt laden)
 - [ ] Rollladen-Zustand als Verschattungsfaktor
 - [ ] Kostenfunktion Wärmepumpe: COP(T_außen, Vorlauf), EPEX-Preis, PV-Überschuss
-- [ ] Diagnostics-Download, Repairs bei fehlenden Sensoren
