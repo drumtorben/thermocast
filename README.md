@@ -7,265 +7,201 @@
 
 # Thermocast
 
-Vorausschauende Heizfreigabe für Home Assistant – mit **online lernenden Raummodellen**,
-**Einstrahlung pro Fenster-/Dachfläche** (Open-Meteo) und einem **Blockplaner**, der
-überdimensionierte Kessel lange und selten statt kurz und oft laufen lässt.
-Ausgelegt für Fußbodenheizung (träger Estrich) + Heizkörper, später Wärmepumpe.
+[Deutsch](README.de.md) · **English**
 
-> Status: v0.7 – 184 Tests (synthetisches Testhaus + HA); seit Oktober 2026 im Betrieb an einer echten Anlage
-> (Gas-Brennwertkessel, Buderus RC310 über EMS-ESP, Fußbodenheizung + Heizkörper mit Better Thermostat).
-> Noch jung – Feedback und Issues willkommen.
-> **Startet im Beobachtungsmodus** und schaltet nichts, bis du `Steuerung aktiv` einschaltest.
+Predictive heating release for Home Assistant – with **room models that learn online**,
+**solar gain per window and roof surface** (Open-Meteo) and a **block planner** that lets an
+oversized boiler run long and rarely instead of short and often.
+Built for underfloor heating (slow screed) plus radiators; a heat pump is the next target.
 
-## Wie es funktioniert
+> Status: v0.7 – 184 tests (synthetic test house + Home Assistant); running on a real system since October 2026
+> (gas condensing boiler, Buderus RC310 via EMS-ESP, underfloor heating + radiators with Better Thermostat).
+> Still young – feedback and issues welcome.
+> **Starts in observe mode** and switches nothing until you turn on `Control active`.
+
+![Now & plan: story, day cards, 72-hour timeline, block candidates](docs/images/now.png)
+
+## Why
+
+Many modern houses have a boiler whose *minimum* output is far above what the house needs in spring and
+autumn (e.g. 7 kW vs. 1–2 kW). The boiler cycles – dozens of short burner starts a day, which costs gas
+and wears the burner. Weather-compensated control alone can't fix that.
+
+Thermocast predicts per room how warm it will be **without** heating – outdoor temperature, sun on each
+window and roof surface, neighbouring rooms, internal gains, the inertia of the screed – and only releases
+the boiler when a leading room would otherwise drop below its comfort band. It does so in **few long blocks**
+that charge the thermal mass, then lets the house coast.
+
+## How it works
 
 ```
-alle 15 min:  Sensoren lesen ──► Stunde abgeschlossen? ──► RLS-Update pro Zone (online, kein Neutraining)
-              Open-Meteo (stündlich, je Flächenausrichtung) ──► 24-h-Simulation ohne Heizung
-              Planer: kein Block | Start 0..23 h × Länge 2..12 h ──► Kosten (Komfort, zu warm, Starts je Tag,
-                      Energie, wenig Abnehmer)
-              Aktor: Mindestblock, Mindestpause, Tagesbudget, Taktsperre, Fail-safe ──► Freigabe-Entität
-              optional je Zone: Better-Thermostat-Sollwert (Laden im Block, Untergrenze, Ruhezeit, Fenster)
+every 15 min:  read sensors ──► hour finished? ──► RLS update per zone (online, no retraining)
+               Open-Meteo (hourly, per surface orientation) ──► 24-h simulation without heating
+               planner: no block | start 0..23 h × length 2..12 h ──► cost (comfort, too warm, starts per day,
+                        energy, few consumers)
+               actuator: min block, min pause, daily budget, anti-cycling lock, fail-safe ──► release entity
+               optional per zone: Better Thermostat target (charge in a block, lower bound, quiet time, windows)
 ```
 
-**Modell pro Zone** (stündlich, linear in den Parametern):
+**Model per zone** (hourly, linear in its parameters):
 
 ```
-ΔT = b0 + a·(T_außen − T) + Σ b_s,l · I_s[t−l] + Σ c_k · Q[t−k] + Σ d_n · (T_n − T) + Σ e_g · G_g
+ΔT = b0 + a·(T_out − T) + Σ b_s,l · I_s[t−l] + Σ c_k · Q[t−k] + Σ d_n · (T_n − T) + Σ e_g · G_g
 ```
 
-| Term | Bedeutung | Verzögerungen |
+| Term | Meaning | Lags |
 |---|---|---|
-| `I_s` Fenster | Einstrahlung auf die Fensterfläche | 0–1 h |
-| `I_s` Dach | Einstrahlung auf die Dachfläche (wirkt durch Dämmung verzögert) | 1–6 h |
-| `Q` FBH | Heiz-Proxy (Vorlauf − Raum, wenn Heizung aktiv) | 0–6 h (Estrich) |
-| `Q` Heizkörper | Proxy × Ventilöffnung | 0–1 h |
-| `T_n` | Nachbarräume | – |
-| `G_g` | innere Gewinne (W-Sensoren, Anwesenheit) | – |
+| `I_s` window | irradiance on the window surface | 0–1 h |
+| `I_s` roof | irradiance on the roof surface (delayed by the insulation) | 1–6 h |
+| `Q` underfloor | heating proxy (flow − room while the heating pump runs) | 0–6 h (screed) |
+| `Q` radiator | proxy × valve share (thermostat `hvac_action`) | 0–1 h |
+| `T_n` | neighbouring rooms | – |
+| `G_g` | internal gains (power sensors, presence) | – |
 
-**Online-Lernen:** Recursive Least Squares mit Vergessensfaktor (Standard 0,996/h ≈ 10 Tage
-Gedächtnis), Vorzeichen-Projektion (Sonne/Heizen/Verluste ≥ 0), Huber-Clipping gegen Ausreißer,
-Kovarianz-Deckel gegen „Wind-up“ im Sommer. Stunden mit offenem Fenster oder Datenlücken werden
-nicht gelernt. Der Planer rechnet mit `Mittelwert − z·σ` → unsicheres Modell heizt eher.
+**Online learning:** recursive least squares with a forgetting factor (default 0.996/h ≈ 10 days of memory),
+sign projection (sun/heating/losses ≥ 0), Huber clipping against outliers, a covariance cap against
+"wind-up" in summer. Hours with an open window or missing data are not learned. The planner uses
+`mean − z·σ`, so an uncertain model heats earlier.
 
-**Warum kein Reinforcement Learning?** Ein Haus liefert ein paar hundert Entscheidungen pro
-Saison; RL bräuchte Größenordnungen mehr und müsste dafür „ausprobieren“ (= frieren).
-Modellbasiert + online identifiziert ist die dateneffiziente, sichere Variante.
+**Why not reinforcement learning?** A house yields a few hundred decisions per season; RL would need orders of
+magnitude more and would have to "explore" (= be cold). Model-based control with online identification is
+the data-efficient, safe option.
 
 ## Installation
 
-**HACS (empfohlen):** HACS → ⋮ → *Benutzerdefinierte Repositories* → `https://github.com/drumtorben/thermocast`,
-Typ *Integration* → „Thermocast“ herunterladen → HA neu starten.
-**Manuell:** `custom_components/thermocast` nach `config/custom_components/` kopieren, HA neu starten.
-Voraussetzung: Home Assistant ≥ 2026.9. Schritt für Schritt: [`docs/INSTALLATION-CHECKLISTE.md`](docs/INSTALLATION-CHECKLISTE.md).
+**HACS (recommended):** HACS → ⋮ → *Custom repositories* → `https://github.com/drumtorben/thermocast`,
+type *Integration* → download "Thermocast" → restart Home Assistant.
+**Manual:** copy `custom_components/thermocast` to `config/custom_components/`, restart.
+Requires Home Assistant ≥ 2026.9. Step by step (German): [`docs/INSTALLATION-CHECKLISTE.md`](docs/INSTALLATION-CHECKLISTE.md).
 
-1. *Einstellungen → Geräte & Dienste → Integration hinzufügen → Thermocast*
-2. Haus: Außentemperatur, Vorlauf, „Heizungspumpe läuft“ (empfohlen!), Freigabe-Entität.
-3. Zonen über **„Zone hinzufügen“** am Integrationseintrag anlegen.
+1. *Settings → Devices & services → Add integration → Thermocast*
+2. House: outdoor temperature, flow temperature, "heating pump running" (recommended!), release entity.
+3. Add zones via **"Add zone"** on the integration entry.
 
-### Freigabe-Entität – Empfehlung für Buderus RC310 via EMS-ESP
+### Release entity – recommendation for Buderus RC310 via EMS-ESP
 
-| Variante | Entität | Wert „erlaubt“ | Wert „gesperrt“ | Verhalten bei HA-Ausfall |
+| Variant | Entity | "allowed" | "blocked" | If Home Assistant is down |
 |---|---|---|---|---|
-| **A (empfohlen)** | Sommer-/Winter-Modus (`select`), Schwelle fest 10 °C | `Winter` | `Auto` | heizt weiter bzw. spätestens unter 10 °C (gedämpft) |
-| B | Sommer-/Winter-Schwelle (`number`) | `16` | `10` | wie A, aber ein Block heizt nur unter 16 °C draußen; im Winterbetrieb taktet die Pumpe |
-| C | Sommer-/Winter-Modus (`select`) | `Winter` | `Sommer` | bleibt gesperrt, bis HA wieder läuft – nur mit Absicherung außerhalb von HA |
+| **A (recommended)** | summer/winter mode (`select`), threshold fixed at 10 °C | `Winter` | `Auto` | keeps heating, or at the latest below 10 °C (damped) |
+| B | summer/winter threshold (`number`) | `16` | `10` | like A, but a block only heats below 16 °C outside; the pump cycles in winter mode |
+| C | summer/winter mode (`select`) | `Winter` | `Summer` | stays blocked until HA is back – only with a safeguard outside HA |
 
-Variante A „degradiert sanft“ und sorgt dafür, dass ein geplanter Block auch an milden Tagen wirklich heizt.
-Schreibzugriffe sind begrenzt (Wechsel ≤ 12/Tag, Schreibvorgänge ≤ 40/Tag mit Bestätigung und Backoff),
-identische Werte werden nicht erneut geschrieben (EEPROM).
+Variant A degrades gracefully and makes sure a planned block really heats on mild days. Writes are limited
+(≤ 12 switches/day, ≤ 40 writes/day with confirmation and backoff), identical values are never rewritten (EEPROM).
 
-### Laden & Zehren: wenige lange Brennerläufe
+### Charge and coast: few long burner runs
 
-Ein überdimensionierter Kessel taktet, wenn er öfter kurz anspringt. Thermocast plant deshalb wenige lange
-Blöcke: während eines Blocks dürfen die Zonen bis zu ihrer **Obergrenze** warm werden (Standard Komfort + 1 K),
-danach zehren sie von der gespeicherten Wärme bis zur Untergrenze (in der Komfortzeit Komfort − Band, sonst der
-**Grundwert**, Standard Komfort − 2 K). Der Regler **„Wenige Brennerstarts ↔ wenig Gas“** (Optionen, Standard 80)
-gewichtet Starts gegen Blockstunden – beide pro Tag gerechnet, so dass eine längere Ladung, die eine lange Pause
-ermöglicht, sich lohnt. Stunden, in denen die Thermostat-Räume zu sind (an ihrer Grenze oder in der Ruhezeit),
-zählen als zusätzliche Starts – Blöcke landen bevorzugt dort, wo viele Räume gleichzeitig Wärme abnehmen.
-Optional setzt Thermocast je Zone den Sollwert von **Better Thermostat** (im Block die Obergrenze, sonst die
-Untergrenze), mit **Ruhezeiten** (fest und/oder `schedule`-Helfer) ohne Stellgeräusche und Respekt vor Handeingriffen.
+During a block, zones may warm up to their **upper bound** (default comfort + 1 K); afterwards they live off the
+stored heat down to the lower bound (comfort − band during comfort time, otherwise the **base temperature**,
+default comfort − 2 K). The **"Few burner starts ↔ little gas"** slider (options, default 80) weighs starts against
+block hours – both per day, so a longer charge that buys a long pause pays off. Hours in which the thermostat
+rooms are closed (at their limit or in quiet time) count as extra starts, so blocks land where many rooms take
+heat at once. Optionally Thermocast sets each zone's **Better Thermostat** target (upper bound in a block, lower
+bound otherwise), with **quiet times** (fixed and/or a `schedule` helper) without valve noise, and it respects
+manual changes.
 
-- **Offenes Fenster** (Fenster-Entitäten der Zone): die Zone löst keinen Block aus, nimmt im Plan keine Wärme
-  und ihr Thermostat bleibt auf dem Grundwert – gelüftet wird nicht gegen die Heizung. Nach dem Schließen plant
-  der nächste Lauf die Wiederaufheizung.
-- **Taktsperre** (Option, mit Sensor *Brennerstarts*): Würde der Kessel nach seiner Sperrzeit nur noch wenige
-  Minuten vor Blockende neu starten, endet der Block kurz davor – ein Start gespart.
-- **Mindestblock** begrenzt nur, wann ein laufender Block frühestens enden darf; geplant werden Blöcke ab 2 h.
-- **Heizkurve prüfen:** Ein Block heizt nur, wenn der Regler genug Vorlauf verlangt. Mit einer witterungsgeführten
-  Kurve liegt der Soll-Vorlauf an milden Tagen oft kaum über der Raumtemperatur – dann zündet der Brenner im Block
-  gar nicht. Abhilfe: Fußpunkt der Kurve anheben (z. B. ~30–35 °C bei +20 °C außen). Zwischen den Blöcken ist der
-  Heizkreis ohnehin gesperrt, der höhere Fußpunkt wirkt also praktisch nur im Block.
+- **Open window** (window entities of the zone): the zone does not call for a block, takes no heat in the plan,
+  and its thermostat holds the base temperature. After closing, the next plan recovers the room.
+- **Anti-cycling lock** (option, needs a burner starts sensor): if the boiler's restart after its lock would only
+  run a few minutes before the block ends, the block ends just before it – one start saved.
+- **Minimum block** only limits how early a running block may end; blocks are planned from 2 h.
+- **Check the heating curve:** a block only heats if the controller asks for enough flow temperature. With a
+  weather-compensated curve the target flow on mild days is often barely above room temperature – then the burner
+  doesn't fire at all. Fix: raise the curve's base point (e.g. ~30–35 °C at +20 °C outside). Between blocks the
+  heating circuit is blocked anyway, so the higher base point practically only acts during a block.
 
-### Beispiel-Zonen (Flächen als YAML im Feld „Sonnenbeschienene Flächen“)
+### Example zones (surfaces as YAML in the "sunlit surfaces" field)
 
-Schlafzimmer – Fenster Ost, Dachschräge Süd:
+Bedroom – east window, south roof slope:
 ```yaml
-- {kind: window, azimuth: 90, tilt: 90, name: Fenster Ost}
-- {kind: roof, azimuth: 180, tilt: 40, name: Schräge Süd}
+- {kind: window, azimuth: 90, tilt: 90, name: East window}
+- {kind: roof, azimuth: 180, tilt: 40, name: South roof}
 ```
-Kinderzimmer – Fenster Ost, Dachschräge Nord:
-```yaml
-- {kind: window, azimuth: 90, tilt: 90}
-- {kind: roof, azimuth: 0, tilt: 40}
-```
-Azimut: 0 = N, 90 = O, 180 = S, 270 = W. Neigung: 90 = senkrecht. Die Größe muss nicht angegeben
-werden – die wirksame Fläche × g-Wert × Verschattung lernt das Modell.
+Azimuth: 0 = N, 90 = E, 180 = S, 270 = W. Tilt: 90 = vertical. No size needed – the model learns the
+effective area × g-value × shading.
 
-EG mit Fußbodenheizung ohne Stellantriebe: **eine Zone** (`fbh`) mit den Sensoren Wohnzimmer +
-Küche, `Führt die Freigabe` = an.
+Ground floor with underfloor heating and no actuators: **one zone** (`fbh`) with the living room + kitchen sensors,
+`Leads the release` = on.
 
-## Entitäten
+## Panel "Thermocast"
 
-| Entität | Bedeutung |
-|---|---|
-| `switch.…_steuerung_aktiv` | aus = Beobachtungsmodus (Standard), Freigabe bleibt „erlaubt“ |
-| `binary_sensor.…_heizfreigabe` | Entscheidung des Planers (auch im Beobachtungsmodus) |
-| `sensor.…_nachster_heizblock` | Start (Attribut: Ende, Prognose-Alter, Fail-safe-Grund) |
-| `sensor.<zone>_prognose_minimum` | tiefste erwartete Temperatur (untere Grenze) ohne Heizen, Attribut `forecast` = Verlauf |
-| `binary_sensor.<zone>_heizbedarf` | Zone fällt ohne Heizen unter ihr Komfortband |
-| `sensor.<zone>_modellfehler` | laufender MAE (K/h), Attribute: Parameter, Sonnenantwort je Fläche |
+A sidebar panel answers: **why is Thermocast heating (or not) right now – and what will it do until tomorrow night?**
 
-## Panel „Thermocast“
+- **Story:** planner wish vs. release, next block, the reason in one sentence, robustness ("tight", "only because
+  of the safety margin σ"), plan change since the last hour, and a note when an actuator rule overrides the planner.
+- **Yesterday · today · tomorrow:** heating hours, blocks, burner starts per block, minimum of the leading zones.
+- **Timeline** (yesterday 00:00 → tomorrow 24:00): weather (sun per surface), past and planned blocks, events,
+  per zone measured / plan ± σ / without heating / comfort window / thermostat target / quiet time.
+  **"Why?"** splits every hour exactly into sun per surface, heating, losses, neighbours, gains (the model is linear).
+- **Candidates** for the next block with their cost breakdown – hover draws the trajectory into the timeline.
 
-Die Integration bringt ein eigenes Seitenpanel mit (Sidebar → *Thermocast*), das beantwortet:
-**Warum heizt Thermocast gerade (nicht) – und was hat es bis morgen Abend vor?**
+![Why? – every hour split into its causes](docs/images/why.png)
 
-- **Story:** Planerwunsch bzw. Freigabe, nächster Block, Begründung in einem Satz, Robustheit
-  („knapp“, „nur wegen der Sicherheitsmarge σ“), Planänderung seit der letzten Stunde (mit vermuteter Ursache),
-  Hinweis, wenn eine Aktor-Regel (Mindestblock/-pause, Budget) den Planer überstimmt.
-- **Gestern · Heute · Morgen:** Heizstunden, Blöcke, Minimum der führenden Zonen, Freigabe vs. Planer, Unsicherheit.
-- **Zeitachse** (fest gestern 00:00 → morgen 24:00): Wetter (gemessen/Prognose, Sonne je Fläche),
-  gelaufene und geplante Blöcke, Ereignisse (Fenster offen, Fail-safe, Prognosefehler, Steuerung an/aus …),
-  je Zone gemessen / Plan ± σ / ohne Heizen / Komfortfenster. **„Warum?“** zerlegt jede künftige Stunde
-  exakt in Sonne je Fläche, Heizen, Verlust, Nachbarn, Gewinne (das Modell ist linear). Fadenkreuz-Tooltip über alle Bahnen.
-- **Kandidaten** für den nächsten Block mit Kostenaufschlüsselung – Hover zeichnet den Verlauf in die Zeitachse –
-  und **Aktor-Regeln**.
+Tab **"Model"** (per zone): hindcast of the last 7 days with the measured inputs (pure model error), forecast
+quality per horizon with σ calibration, learned parameters read physically (time constant, sun per surface,
+heating, neighbours) with a 30-day history, screed lag profile, and a **JSON export** of all model states and logs.
 
-Tab **„Modell“** (je Zone): Wie gut beschreibt das Modell die Zone?
-- **Modellfehler (Hindcast):** das aktuelle Modell simuliert die letzten 7 Tage mit den *gemessenen* Eingängen
-  (Neustart jede Mitternacht) – reiner Modellfehler, unabhängig von Wetterprognose und Plan.
-- **Prognosegüte je Horizont** (1/3/6/12/24 h): MAE, Bias und Kalibrierung (Anteil der Messungen innerhalb ±σ;
-  ≈ 68 % wäre richtig kalibriert – deutlich weniger heißt: die Sicherheitsmarge ist zu knapp).
-- **Gelernte Parameter** physikalisch gelesen: Zeitkonstante τ (h), Sonne je Fläche (K/h je kW/m²),
-  Heizen (K/h im typischen Block), Nachbarkopplung, Gewinne, Grunddrift – mit ±1σ und 30-Tage-Verlauf;
-  Estrich-Verzögerungsprofil. **JSON-Export** aller Modellzustände und Logs (z. B. für polars).
+![Model tab](docs/images/model.png)
 
-Tab **„KPIs“** (14/30/90 Tage, aus den Recorder-Langzeitstatistiken): Brennerstarts/Tag, kWh pro Heizgradtag
-(Heizgrenze 15 °C), Minimum der führenden Zonen in Komfortzeit, Unterschreitungsstunden – jeweils
-**vor** und **seit** dem ersten Einschalten der Steuerung. Dafür in den Optionen der Integration
-**Brennerstarts** und **Heizenergie** (beide `total_increasing`, z. B. von EMS-ESP) eintragen; optional
-**Warmwasser aktiv** für die Schraffur in der Zeitachse.
+Tab **"KPIs"** (14/30/90 days, from the recorder's long-term statistics): burner starts/day, kWh per heating
+degree day, comfort – **before** and **since** control was enabled.
 
-Der Plan bis morgen entsteht durch einen **Rollout des echten Reglers**: stündlich neu planen, Mindestblock,
-Mindestpause und Tagesbudget anwenden, Zustand fortschreiben. Im Beobachtungsmodus führt ein Schatten-Aktor
-die Regeln virtuell mit. Die Vergangenheit kommt aus dem Recorder; ohne Recorder bleibt sie leer.
-Das Panel ist reine Ansicht und läuft getrennt vom Regelpfad – ein Fehler dort ändert nie die Freigabe.
+<p>
+  <img src="docs/images/kpis.png" width="58%" alt="KPI tab">
+  <img src="docs/images/phone.png" width="20%" alt="Phone width">
+</p>
 
-### ApexCharts-Karte (Prognose vs. Komfort)
+The plan until tomorrow comes from a **rollout of the real controller**: re-plan every hour, apply the actuator
+rules, carry the state forward. The panel is view-only and runs apart from the control path – an error there never
+changes the release. Panel texts: English and German.
 
-```yaml
-type: custom:apexcharts-card
-graph_span: 24h
-span: {start: hour}
-header: {show: true, title: Schlafzimmer – Prognose ohne Heizen}
-series:
-  - entity: sensor.schlafzimmer_prognose_minimum
-    name: Erwartet
-    data_generator: |
-      return entity.attributes.forecast.map(p => [new Date(p.time).getTime(), p.mean]);
-  - entity: sensor.schlafzimmer_prognose_minimum
-    name: Untere Grenze
-    data_generator: |
-      return entity.attributes.forecast.map(p => [new Date(p.time).getTime(), p.lower]);
-  - entity: sensor.schlafzimmer_prognose_minimum
-    name: Komfort
-    data_generator: |
-      return entity.attributes.forecast.map(p => [new Date(p.time).getTime(), p.comfort_low]);
-```
+## Safety
 
-## Sicherheit
+* Observe mode is the default.
+* Turning heating on is always allowed; turning it off only after the minimum block and within the daily budget.
+* Update error, forecast older than 2 h, missing sensor of a leading zone → release **on**.
+  A fail-safe lasting more than 1 h raises a repair issue.
+* Unloading/removing the integration or switching control off → release **on** (a reload after a config change
+  doesn't). After an HA start, missing sensors/forecast wait up to 5 min before the fail-safe (MQTT/Zigbee are often late).
+* **EEPROM protection:** every write must be confirmed by the entity; unconfirmed → retry after 10 min with growing
+  pauses (30 min … 6 h); never more than **40 writes per day**.
 
-* Beobachtungsmodus ist Standard.
-* Einschalten der Heizung ist immer erlaubt; Ausschalten nur nach Mindestblock und im Tagesbudget.
-* Fehler im Update, Prognose älter als 2 h, fehlender Sensor einer führenden Zone → Freigabe **an**.
-  Dauert ein Fail-safe länger als 1 h, erscheint ein Reparaturhinweis.
-* Entladen/Entfernen der Integration oder Ausschalten der Steuerung → Freigabe **an**
-  (ein Neuladen nach einer Konfigurationsänderung nicht). Nach einem HA-Start warten fehlende Sensoren/Prognose
-  bis zu 5 min, bevor der Fail-safe greift (MQTT/Zigbee kommen oft verzögert).
-* **EEPROM-Schutz:** Jeder Schreibvorgang muss von der Entität bestätigt werden. Unbestätigt → neuer Versuch
-  erst nach 10 min, dann mit wachsender Pause (30 min … 6 h), Ereignis + Reparaturhinweis. Nie mehr als
-  **40 Schreibvorgänge pro Tag**; bei nicht verfügbarer Entität wird gar nicht geschrieben.
+## Learning, calibration, diagnostics
 
-## Lernen, Kalibrierung, Diagnose
+* **Warm start:** new zones learn from the last **30 days** of recorder statistics (+ past irradiance from Open-Meteo).
+  The button *"Re-learn models from history"* does that for all zones.
+* **σ calibration** (option, on by default): forecast errors of the last 14 days widen the planner's uncertainty per
+  horizon (never narrow it).
+* **Comfort schedule:** per zone optionally a `schedule.*` helper, e.g. office on weekdays 8–17.
+* **Download diagnostics** (⋮ on the integration): all models, logs, events, actuator state.
 
-* **Warmstart:** Neue Zonen lernen beim Einrichten aus den letzten **30 Tagen** Recorder-Langzeitstatistik
-  (+ Einstrahlung aus Open-Meteo-Vergangenheitsdaten) statt mit Standardwerten zu starten. Der Button
-  *„Modelle aus Historie neu lernen“* wiederholt das für alle Zonen.
-* **σ-Kalibrierung** (Option, Standard an): Aus den beobachteten Prognosefehlern der letzten 14 Tage wird je
-  Horizont ein Faktor gelernt, um den der Planer die Unsicherheit weitet (nie verengt). Sichtbar im Modell-Tab („σ ×“).
-* **Komfort-Zeitplan:** Je Zone optional ein Zeitplan-Helfer (`schedule.*`), z. B. Büro werktags 8–17 Uhr.
-* **Diagnose herunterladen** (⋮ an der Integration): alle Modelle, Logs, Ereignisse, Aktorzustand.
-* Installation in einer echten HA: siehe [`docs/INSTALLATION-CHECKLISTE.md`](docs/INSTALLATION-CHECKLISTE.md).
-
-## Entwicklung
-
-```
-custom_components/thermocast/
-├── core/            reines Python + numpy (Notebook- & Test-tauglich, kein HA-Import)
-│   ├── model.py     OnlineZoneModel (RLS), Ursachen-Zerlegung
-│   ├── forecast.py  Open-Meteo, Einstrahlung je Ausrichtung
-│   ├── planner.py   Blockplaner, Ober-/Untergrenze, Lade-Deckel, Kostenfunktion „Laden & Zehren“
-│   ├── bt.py        Better-Thermostat-Sollwert (rein): Laden, Untergrenze, Ruhezeit
-│   ├── rules.py     Aktor-Regeln (rein)
-│   ├── rollout.py   Regler-Rollout bis morgen 24:00
-│   ├── explain.py   Begründungs-Codes, Robustheit, Planänderung
-│   ├── series.py    Stundenaggregation von Zustandsfolgen
-│   └── view.py      Panel-View-Vertrag v1
-├── coordinator.py   Sensoren → Stunden-Samples → Modell → Planer → Aktor
-├── actuator.py      Freigabe schalten (Mindestzeiten, Budget, Fail-safe)
-├── zone_actuator.py Better-Thermostat-Sollwerte je Zone (opt-in, Handeingriffe, Ruhezeiten)
-├── view_builder.py  Panel-Daten (Historie, Rollout, Ereignisse) – getrennt vom Regelpfad
-├── history.py, events.py, websocket_api.py, panel.py
-├── frontend/        Panel (Lit, ohne Build): thermocast-panel.js, tc-*.js, i18n.js, dev/
-└── config_flow.py   Haus, Zonen (Subentries), Optionen
-```
+## Development
 
 ```bash
-uv sync                        # .venv mit Home Assistant + pytest-homeassistant-custom-component
-uv run pytest                  # Kern- und HA-Tests
-uv run pytest tests/test_core.py   # nur Kern, ohne HA
-./scripts/develop              # lokale HA-Instanz mit Fake-Sensoren → http://localhost:8123
-```
-
-Die Dev-Instanz (`config/configuration.yaml`) bringt Schieberegler für Außen-, Vorlauf- und
-Raumtemperaturen, einen Heizungspumpen-Schalter und `input_number.summer_threshold` als Freigabe.
-
-Panel-Entwicklung ohne HA:
-
-```bash
-uv run python scripts/sample_view.py      # Beispiel-Antworten (View, Modell, KPIs) aus synthetischen Daten
+uv sync                        # .venv with Home Assistant + pytest-homeassistant-custom-component
+uv run pytest                  # core and HA tests
+./scripts/develop              # local HA with fake sensors → http://localhost:8123
+uv run python scripts/sample_view.py      # demo data for the panel (synthetic house)
 uv run python -m http.server -d custom_components/thermocast/frontend 8765
-# → http://localhost:8765/dev/   (?tab=now|model|kpis, ?lang=en, ?dark=1, ?hover=50, ?cand=1, ?why=1, ?src=<datei.json>)
+# → http://localhost:8765/dev/   (?tab=now|model|kpis, ?lang=en, ?dark=1, ?why=1)
 ```
 
-Im Notebook: `sys.path.insert(0, "custom_components/thermocast")`, dann `from core import OnlineZoneModel`.
+`core/` is plain Python + numpy without Home Assistant imports (notebook-friendly):
+`sys.path.insert(0, "custom_components/thermocast")`, then `from core import OnlineZoneModel`.
+Project notes for contributors (German): [`CLAUDE.md`](CLAUDE.md).
 
 ## Roadmap
 
-- [x] HA-Tests mit `pytest-homeassistant-custom-component` (Config Flow, Coordinator)
-- [x] Panel „Gestern · Heute · Morgen“ (Begründung, Plan, Ursachen, Kandidaten)
-- [x] Panel B: Modellgüte (Hindcast, Prognosehorizonte, Kalibrierung, Parameter, JSON-Export, WW-Ladungen)
-- [x] Panel C: KPIs (Brennerstarts/Tag, kWh pro Heizgradtag, Komfort, vorher/nachher)
-- [x] Warmstart aus der Recorder-Historie beim Einrichten (statt Prior)
-- [x] Zonen-Komfort und Ruhezeiten aus `schedule`-Helfern
-- [x] Diagnostics-Download, Repairs (Fail-safe, EEPROM-Schreibschutz)
-- [x] „Laden & Zehren“: Ober-/Untergrenze, Zehrzeit, Better-Thermostat-Steuerung, Ruhezeiten
-- [x] Blöcke bevorzugt bei vielen offenen Abnehmern; fensterbewusst; Blockende passend zur Taktsperre
-- [ ] Innere Gewinne nach Tagesprofil prognostizieren (dann Hausstrom als Gewinn-Signal)
-- [ ] Anwesenheit (`zone.home`) im Komfort
-- [ ] Zwei-Zustands-Modell (Luft + Speichermasse) bzw. geglättetes Sonnensignal
-- [ ] Kurvenanhebung während eines Blocks (Estrich gezielt laden)
-- [ ] Rollladen-Zustand als Verschattungsfaktor
-- [ ] Kostenfunktion Wärmepumpe: COP(T_außen, Vorlauf), EPEX-Preis, PV-Überschuss
+- [x] Panel: now & plan, model quality, KPIs
+- [x] Warm start from recorder history, comfort and quiet times from `schedule` helpers, diagnostics, repairs
+- [x] Charge and coast: upper/lower bound, coast time, Better Thermostat control, quiet times
+- [x] Blocks preferably with many open consumers; window-aware; block end matched to the anti-cycling lock
+- [ ] Internal gains forecast by daily profile (then house power as a gain signal)
+- [ ] Presence (`zone.home`) in comfort
+- [ ] Two-state model (air + thermal mass) or a smoothed solar signal
+- [ ] Raise the curve during a block (charge the screed on purpose)
+- [ ] Heat pump cost function: COP(T_out, flow), EPEX price, PV surplus
+
+## License
+
+MIT

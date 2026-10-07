@@ -171,7 +171,8 @@ def main() -> None:
         decision={
             "planner_wants": outlook.rollout.first.heat_now, "applied": True, "control_enabled": False,
             "override": "observe", "failsafe_reason": None, "switches_today": 0, "max_switches": 12,
-            "rules": {"min_block_h": 3, "min_pause_h": 2, "max_switches": 12}, "since_last_change_min": None,
+            "rules": {"min_block_h": 3, "min_pause_h": 2, "max_switches": 12, "starts_weight": 80.0,
+                  "anti_cycle_min": 45.0}, "since_last_change_min": None,
             "forecast_age_min": 12, "release_entity": "select.thermostat_hc1_summersetmode", "release_state": True,
             "bt": {"zone_eltern": {"target": 20.0 if on_now else 19.0, "reason": "observe", "override_until": None}},
         },
