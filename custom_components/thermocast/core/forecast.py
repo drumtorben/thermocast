@@ -4,6 +4,7 @@ No Home Assistant imports – pass any aiohttp-compatible ClientSession.
 """
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -61,7 +62,7 @@ async def fetch_forecast(
     """Fetch temperature + global tilted irradiance for every unique orientation.
 
     Open-Meteo accepts one tilt/azimuth per request, so we issue one request per
-    orientation (they are tiny and cached by the caller).
+    orientation – concurrently (they are tiny and cached by the caller).
     """
     base = {
         "latitude": latitude,
@@ -72,24 +73,26 @@ async def fetch_forecast(
     }
     fc = Forecast(fetched_at=datetime.now(UTC))
 
-    # temperature (+ horizontal irradiance as fallback key "0_0")
-    data = await _get(session, {**base, "hourly": "temperature_2m,shortwave_radiation"})
-    fc.times = _parse_times(data["hourly"]["time"])
-    fc.t_out = [float(x) if x is not None else float("nan") for x in data["hourly"]["temperature_2m"]]
-    fc.irr["0_0"] = [float(x or 0.0) for x in data["hourly"]["shortwave_radiation"]]
-
-    seen: set[str] = {"0_0"}
+    unique: dict[str, tuple[float, float]] = {}
     for key, tilt, azimuth in orientations:
-        if key in seen:
-            continue
-        seen.add(key)
-        params = {
+        if key != "0_0":
+            unique.setdefault(key, (tilt, azimuth))
+    requests = [_get(session, {**base, "hourly": "temperature_2m,shortwave_radiation"})] + [
+        _get(session, {
             **base,
             "hourly": "global_tilted_irradiance",
             "tilt": round(tilt, 1),
             "azimuth": round(compass_to_open_meteo(azimuth), 1),
-        }
-        d = await _get(session, params)
+        })
+        for tilt, azimuth in unique.values()
+    ]
+    data, *tilted = await asyncio.gather(*requests)
+
+    # temperature (+ horizontal irradiance as fallback key "0_0")
+    fc.times = _parse_times(data["hourly"]["time"])
+    fc.t_out = [float(x) if x is not None else float("nan") for x in data["hourly"]["temperature_2m"]]
+    fc.irr["0_0"] = [float(x or 0.0) for x in data["hourly"]["shortwave_radiation"]]
+    for key, d in zip(unique, tilted):
         fc.irr[key] = [float(x or 0.0) for x in d["hourly"]["global_tilted_irradiance"]]
     return fc
 

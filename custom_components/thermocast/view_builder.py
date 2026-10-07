@@ -1,13 +1,16 @@
 """Assemble the panel view next to the control path (never inside it)."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from functools import partial
 from statistics import fmean
 from typing import TYPE_CHECKING, Any
 
+from homeassistant.core import callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
@@ -72,14 +75,40 @@ class ViewBuilder:
         self._shadow_change: datetime | None = None
         self._shadow_switches = 0
         self._shadow_day = None
+        # the full rebuild (recorder, rollout, hindcast) runs in the background: neither the control path nor a
+        # (re)load waits for it; the panel gets the result through these listeners
+        self._listeners: list[Callable[[], None]] = []
+        self._build_task: asyncio.Task | None = None
+        self._pending: tuple[datetime, ThermocastData, tuple] | None = None
+        self._unloaded = False
 
     @property
     def shadow_on(self) -> bool:
         """Observe mode: would the release be on now (same rules as the real actuator)?"""
         return self._shadow_on
 
+    @callback
+    def async_add_listener(self, listener: Callable[[], None]) -> Callable[[], None]:
+        """Called whenever the view changed (websocket subscription). Returns the remove function."""
+        self._listeners.append(listener)
+
+        def remove() -> None:
+            if listener in self._listeners:
+                self._listeners.remove(listener)
+
+        return remove
+
+    def _notify(self) -> None:
+        for listener in list(self._listeners):
+            listener()
+
     def mark_unloaded(self) -> None:
+        self._unloaded = True
+        self._pending = None
+        if self._build_task is not None and not self._build_task.done():
+            self._build_task.cancel()
         self.view = {"error": "unloaded"}
+        self._notify()  # open panels re-subscribe
 
     def invalidate(self) -> None:
         """Force a full rebuild on the next refresh (e.g. after a warm start replaced the models)."""
@@ -105,8 +134,12 @@ class ViewBuilder:
         since = (now - self._shadow_change).total_seconds() / 3600 if self._shadow_change else math.inf
         return ActuatorState(on=self._shadow_on, since_h=since, switches_today=self._shadow_switches)
 
-    async def async_refresh(self, now: datetime, data: ThermocastData) -> None:
-        """Rebuild on a new hour / forecast / fail-safe change, otherwise only refresh decision + events."""
+    @callback
+    def async_schedule_refresh(self, now: datetime, data: ThermocastData) -> None:
+        """Rebuild on a new hour / forecast / fail-safe change (in the background), otherwise only refresh
+        decision + events right away. Never raises."""
+        if self._unloaded:
+            return
         c = self._c
         try:
             self._update_shadow(now, data)
@@ -114,19 +147,50 @@ class ViewBuilder:
             # zones with a plan belong to the key: right after a start the first view has none yet
             planned = tuple(sorted(sid for sid, zr in data.zones.items() if zr.times))
             key = (hour0, c.forecast.fetched_at if c.forecast else None, data.failsafe_reason, planned)
-            if self.view is None or "error" in self.view or key != self._key:
-                self.view = await self._async_build(now, hour0, data)
-                self._key = key
-            else:
-                self.view = {
-                    **self.view,
-                    "generated_at": now.isoformat(),
-                    "decision": self._decision(now, data),
-                    "events": self._events(),
-                }
+            if self._is_current(key):
+                self._refresh_decision(now, data)
+                self._notify()
+                return
         except Exception as err:
-            _LOGGER.exception("Thermocast: building the panel view failed")
+            _LOGGER.exception("Thermocast: refreshing the panel view failed")
             self.view = {"error": f"{type(err).__name__}: {err}"}
+            self._notify()
+            return
+        self._pending = (now, data, key)
+        if self._build_task is None or self._build_task.done():
+            self._build_task = c.config_entry.async_create_background_task(
+                c.hass, self._async_build_pending(), "thermocast_view"
+            )
+
+    def _is_current(self, key: tuple) -> bool:
+        return self.view is not None and "error" not in self.view and key == self._key
+
+    def _refresh_decision(self, now: datetime, data: ThermocastData) -> None:
+        assert self.view is not None
+        self.view = {
+            **self.view,
+            "generated_at": now.isoformat(),
+            "decision": self._decision(now, data),
+            "events": self._events(),
+        }
+
+    async def _async_build_pending(self) -> None:
+        """Build the latest requested view; updates that arrive meanwhile only rebuild when their key differs."""
+        while self._pending is not None and not self._unloaded:
+            now, data, key = self._pending
+            self._pending = None
+            try:
+                if self._is_current(key):
+                    self._refresh_decision(now, data)
+                else:
+                    view = await self._async_build(now, now.replace(minute=0, second=0, microsecond=0), data)
+                    if self._unloaded:
+                        return
+                    self.view, self._key = view, key
+            except Exception as err:
+                _LOGGER.exception("Thermocast: building the panel view failed")
+                self.view = {"error": f"{type(err).__name__}: {err}"}
+            self._notify()
 
     # ------------------------------------------------------------------ parts
     def _decision(self, now: datetime, data: ThermocastData) -> dict[str, Any]:

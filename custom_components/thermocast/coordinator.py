@@ -86,6 +86,7 @@ STARTUP_GRACE = timedelta(minutes=5)  # after a start: missing sensors/forecast 
 STARTUP_RECHECK = timedelta(minutes=1)  # … and are checked again every minute
 STARTUP_HOLD_REASONS = ("no_temperature", "no_forecast", "forecast_gap", "no_zones")
 RELOADING = "reloading"  # set by the update listener: the next unload is a self-reload, not a removal
+FORECAST_CACHE = "forecast"  # entry id -> Forecast: a reload reuses a fresh forecast instead of fetching again
 
 
 # --------------------------------------------------------------------- helpers
@@ -377,6 +378,8 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
             self.zones[subentry.subentry_id] = zr
         cs = stored.get("control_since")
         self.control_since = datetime.fromisoformat(cs) if cs else None
+        # _ensure_forecast still checks its age and whether it covers every surface
+        self.forecast = self.hass.data.get(DOMAIN, {}).get(FORECAST_CACHE, {}).pop(self.config_entry.entry_id, None)
 
     def _update_failsafe_issue(self, now: datetime, failsafe: str | None) -> None:
         """Repair issue only for a fail-safe that lasts (a single failed forecast fetch is not news)."""
@@ -512,9 +515,10 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
         if self.control_enabled and not reloading:
             await self._release_everything()
         await self.async_save()
-        self.view_builder.mark_unloaded()
+        if self.forecast:
+            self.hass.data.setdefault(DOMAIN, {}).setdefault(FORECAST_CACHE, {})[self.config_entry.entry_id] = self.forecast
+        self.view_builder.mark_unloaded()  # open panels re-subscribe
         ir.async_delete_issue(self.hass, DOMAIN, ISSUE_FAILSAFE)  # a removed integration has nothing to repair
-        self.async_update_listeners()  # open panels re-subscribe
 
     def _startup_hold(self, now: datetime, failsafe: str | None) -> bool:
         """Right after a start, missing sensors or forecast are expected (MQTT/Zigbee reconnecting) –
@@ -646,7 +650,7 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
             planner_heat=result["want_heat"],
             bt=bt,
         )
-        await self.view_builder.async_refresh(now, data_out)  # never raises
+        self.view_builder.async_schedule_refresh(now, data_out)  # never raises; a rebuild runs in the background
         return data_out
 
     def _trim_tail(self, now: datetime, block_end: datetime | None) -> bool:
@@ -722,12 +726,14 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
             z.quiet_plan = plans.get(quiet) if quiet else None
 
     async def _ensure_forecast(self, now: datetime) -> None:
-        if self.forecast and self.forecast.fetched_at and now - self.forecast.fetched_at < FORECAST_MAX_AGE:
-            return
         orientations: dict[str, tuple[str, float, float]] = {}
         for z in self.zones.values():
             for s in z.model.spec.surfaces:
                 orientations[s.key] = (s.key, s.tilt, s.azimuth)
+        fc = self.forecast
+        # a new surface (zone added/changed) needs its own irradiance series – the model would read 0 W/m²
+        if fc and fc.fetched_at and now - fc.fetched_at < FORECAST_MAX_AGE and orientations.keys() <= fc.irr.keys():
+            return
         try:
             self.forecast = await fetch_forecast(
                 async_get_clientsession(self.hass),

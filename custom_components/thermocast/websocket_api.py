@@ -41,7 +41,7 @@ def ws_subscribe(hass: HomeAssistant, connection: websocket_api.ActiveConnection
     def forward() -> None:
         connection.send_message(websocket_api.event_message(msg["id"], {"view": coordinator.view}))
 
-    connection.subscriptions[msg["id"]] = coordinator.async_add_listener(forward)
+    connection.subscriptions[msg["id"]] = coordinator.view_builder.async_add_listener(forward)
     connection.send_result(msg["id"])
     forward()
 
