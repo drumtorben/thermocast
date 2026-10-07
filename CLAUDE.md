@@ -162,7 +162,7 @@ Attr. Parameter + Sonnenantwort je Fläche).
 
 ---
 
-## 4. Status (v0.7.1)
+## 4. Status (v0.7.2)
 
 - ✅ Kern getestet auf synthetischen Daten: 1-Schritt-MAE ≈ 0,03 K/h, 24-h-Prognose-MAE ≈ 0,1 K,
   Ostfenster und Süddach werden getrennt gelernt, Planer heizt bei −5 °C, nicht bei 18 °C.
@@ -186,7 +186,12 @@ Attr. Parameter + Sonnenantwort je Fläche).
   - Im Beobachtungsmodus startet der Rollout vom **Schatten-Aktor** (`ViewBuilder._update_shadow`),
     sonst ignorierte er Mindestblock/-pause.
   - Periodische Coordinator-Refreshes sind Background-Tasks → in Tests
-    `async_block_till_done(wait_background_tasks=True)`.
+    `async_block_till_done(wait_background_tasks=True)`. Ebenso der Panel-View: ein Neubau (neue Stunde/Prognose/
+    Fail-safe) läuft als Background-Task (`ViewBuilder.async_schedule_refresh`), Setup/Reload warten nicht darauf;
+    das Panel abonniert `ViewBuilder.async_add_listener`, nicht den Coordinator.
+  - Planer: `ZonePlanInput.heating_batch` → `OnlineZoneModel.predict_batch` rechnet alle Kandidaten einer Zone als
+    Matrix (Modell linear in T). Muss mit `predict` übereinstimmen (`tests/test_predict_batch.py`).
+  - Reload übernimmt die Prognose (< 1 h, alle Flächen-Ausrichtungen enthalten) über `hass.data` (`FORECAST_CACHE`).
   - Recorder-Tests brauchen `recorder_mock` vor `hass` → eigenes Modul mit überschriebener
     autouse-Fixture (`tests/test_view_history.py`, `tests/test_kpi_ha.py`).
   - WebSocket-Tests nicht mit `freezer` in die Vergangenheit springen (Token wird ungültig) –
@@ -206,7 +211,8 @@ Attr. Parameter + Sonnenantwort je Fläche).
   Stufe 2 offen: Lade-Hebel (Vorlauf/Pumpe im Block) – erst nach Test des Hebels an der Anlage.
 - ✅ v0.5.x–v0.7.1 (mit echter Anlage): Neuladen ohne Freigabe-Flip, 5-min-Anlaufphase, Panel-Pfad je Version,
   KPI Energie/Tag; v0.6: Kosten „wenig Abnehmer“; v0.6.1: Neulernen behält jüngste Live-Stunde (`merge_logs`);
-  v0.7: fensterbewusst (Planer + BT), Blockende vor kurzem Taktsperre-Neustart; v0.7.1: Panel-Feinheiten.
+  v0.7: fensterbewusst (Planer + BT), Blockende vor kurzem Taktsperre-Neustart; v0.7.1: Panel-Feinheiten;
+  v0.7.2: Performance – Reload ohne View-Neubau/Prognose-Abruf, Planer vektorisiert (Rollout ~10× schneller).
   Erkenntnis an der Anlage: an milden Tagen liefert die witterungsgeführte Kurve kaum Vorlauf → Fußpunkt anheben
   (README); längere Fenster-Verzögerungen (0–3 h) getestet und verworfen (MAE minimal schlechter).
 - Bekannte Schwächen:
