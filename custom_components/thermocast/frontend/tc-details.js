@@ -77,6 +77,11 @@ class TcDetails extends LitElement {
         ${item(d.override === "observe", t(L, "r_observe"))}
         ${item(d.override === "failsafe", t(L, "r_failsafe") + (d.failsafe_reason ? `: ${d.failsafe_reason}` : ""))}
       </ul>
+      <p class="entity">
+        ${t(L, "r_starts_weight", { v: r.starts_weight ?? "–" })}${r.anti_cycle_min
+          ? html` · ${t(L, "r_anti_cycle", { v: r.anti_cycle_min })}`
+          : nothing}
+      </p>
       <p class="entity">${t(L, "r_entity", { e: d.release_entity, s: state })}</p>
     </div>`;
   }

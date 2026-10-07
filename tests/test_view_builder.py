@@ -47,6 +47,35 @@ async def test_observe_mode_plan_respects_min_block(
             assert hours >= 3, blocks
 
 
+async def test_open_window_shows_the_base_as_thermostat_target(
+    hass: HomeAssistant, mock_entry, mock_open_meteo
+) -> None:
+    from custom_components.thermocast.const import CONF_BASE_TEMP, CONF_BT_CONTROL, CONF_BT_ENTITY, CONF_WINDOW_ENTITIES
+
+    sub = next(iter(mock_entry.subentries.values()))
+    mock_entry.add_to_hass(hass)
+    hass.config_entries.async_update_subentry(mock_entry, sub, data={
+        **sub.data, CONF_BT_CONTROL: True, CONF_BT_ENTITY: "climate.bt", CONF_BASE_TEMP: 17.0,
+        CONF_WINDOW_ENTITIES: ["binary_sensor.window"],
+    })
+    hass.states.async_set("climate.bt", "heat", {"temperature": 20.0})
+    hass.states.async_set("binary_sensor.window", "on")
+    await _setup_states(hass)
+    await _setup_entry(hass, mock_entry)
+    view = mock_entry.runtime_data.view
+    now = view["window"]["now_index"]
+    assert set(view["zones"][0]["bt_target"][now:]) == {17.0}
+
+
+async def test_decision_lists_the_starts_options(hass: HomeAssistant, mock_entry, mock_open_meteo) -> None:
+    mock_entry.add_to_hass(hass)
+    hass.config_entries.async_update_entry(mock_entry, options={"anti_cycle_minutes": 45, "starts_weight": 60})
+    await _setup_states(hass)
+    await _setup_entry(hass, mock_entry)
+    rules = mock_entry.runtime_data.view["decision"]["rules"]
+    assert rules["anti_cycle_min"] == 45 and rules["starts_weight"] == 60
+
+
 async def test_view_without_forecast(hass: HomeAssistant, mock_entry, aioclient_mock) -> None:
     aioclient_mock.get("https://api.open-meteo.com/v1/forecast", status=500)
     await _setup_states(hass)

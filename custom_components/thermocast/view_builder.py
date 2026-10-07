@@ -12,6 +12,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    CONF_ANTI_CYCLE_MIN,
     CONF_BT_CONTROL,
     CONF_BT_ENTITY,
     CONF_BURNER_STARTS,
@@ -27,9 +28,12 @@ from .const import (
     CONF_RELEASE_ENTITY,
     CONF_RELEASE_OFF,
     CONF_RELEASE_ON,
+    CONF_STARTS_WEIGHT,
     CONF_TEMP_SENSORS,
+    DEFAULT_ANTI_CYCLE_MIN,
     DEFAULT_CONFIDENCE_Z,
     DEFAULT_MIN_BLOCK_H,
+    DEFAULT_STARTS_WEIGHT,
     DOMAIN,
 )
 from .core.bt import round_target
@@ -128,6 +132,7 @@ class ViewBuilder:
     def _decision(self, now: datetime, data: ThermocastData) -> dict[str, Any]:
         a = self._c.actuator
         rules = a.rules
+        options = self._c.config_entry.options
         return {
             "planner_wants": data.planner_heat,
             "applied": data.release_on,
@@ -140,6 +145,8 @@ class ViewBuilder:
                 "min_block_h": rules.min_block_h,
                 "min_pause_h": rules.min_pause_h,
                 "max_switches": rules.max_switches,
+                "starts_weight": float(options.get(CONF_STARTS_WEIGHT, DEFAULT_STARTS_WEIGHT)),
+                "anti_cycle_min": float(options.get(CONF_ANTI_CYCLE_MIN, DEFAULT_ANTI_CYCLE_MIN)),
             },
             "since_last_change_min": round(a.elapsed_h(now) * 60) if a.last_change else None,
             "forecast_age_min": _round(data.forecast_age_min, 0),
@@ -169,6 +176,7 @@ class ViewBuilder:
             zone_floor,
             zone_high,
             zone_quiet,
+            zone_window_open,
         )
 
         c = self._c
@@ -296,6 +304,10 @@ class ViewBuilder:
             if bt_eid:
                 bt_on = [round_target(cap) if (cap := zone_charge_cap(z, h)) is not None else None for h in hours]
                 bt_off = [round_target(zone_base(z) if q else f) for q, f in zip(quiet, floor)]
+                if zone_window_open(hass, z):  # same as the actuator: the base while airing (from now on)
+                    base = round_target(zone_base(z))
+                    bt_on = bt_on[: window.now_index] + [base] * (n - window.now_index)
+                    bt_off = bt_off[: window.now_index] + [base] * (n - window.now_index)
                 bt_past = hourly_mean(bt_hist.get(bt_eid, []), hours, now)
             zones.append(
                 ZoneViewInput(
