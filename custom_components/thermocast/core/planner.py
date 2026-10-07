@@ -9,6 +9,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 
+import numpy as np
+
 from .model import HourRecord, OnlineZoneModel, Prediction
 
 
@@ -56,22 +58,36 @@ class ZonePlanInput:
 
     def heating_prediction(self, cand: Candidate) -> tuple[list[HourRecord], Prediction]:
         """(inputs, prediction) with the block's heating; a capped zone's thermostat closes at its cap."""
-        recs = [replace(rec, q=self.q_on if cand.active(i) else 0.0) for i, rec in enumerate(self.future)]
-        pred = self.predict(recs)
-        if not self.capped or cand.start is None:
-            return recs, pred
+        q, mean, std = self.heating_batch([cand])
+        recs = [replace(rec, q=float(q[0, i])) for i, rec in enumerate(self.future)]
+        return recs, Prediction(mean=mean[0].tolist(), std=std[0].tolist())
+
+    def predict_batch(self, q: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """(mean, std) per heating schedule (rows of ``q``), σ calibrated like ``predict``."""
+        mean, std = self.model.predict_batch(self.temp_now, self.future, q, var0=self.var0, history=self.history)
+        if self.std_scale:
+            last = len(self.std_scale) - 1
+            std = std * np.array([self.std_scale[min(self.scale_offset + i, last)] for i in range(q.shape[1])])
+        return mean, std
+
+    def heating_batch(self, cands: list[Candidate]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """(q, mean, std) for many blocks at once (candidates × hours); a capped zone's thermostat closes the
+        valve in hours that start at or above its cap."""
+        n = len(self.future)
+        q = np.where(_active(cands, n), self.q_on, 0.0)
+        mean, std = self.predict_batch(q)
+        if not self.capped or not n:
+            return q, mean, std
+        caps = np.array([np.nan if (c := self.cap_at(i)) is None else c for i in range(n)])
         for _ in range(3):  # closing the valve changes the later hours – a few passes settle it
-            changed = False
-            for i in range(len(recs)):
-                start_temp = self.temp_now if i == 0 else pred.mean[i - 1]
-                cap = self.cap_at(i)
-                if recs[i].q > 0 and cap is not None and start_temp >= cap:
-                    recs[i] = replace(recs[i], q=0.0)
-                    changed = True
-            if not changed:
+            start_temp = np.concatenate([np.full((len(cands), 1), self.temp_now), mean[:, :-1]], axis=1)
+            shut = (q > 0) & (start_temp >= caps)  # NaN (no cap) compares False
+            rows = shut.any(axis=1)
+            if not rows.any():
                 break
-            pred = self.predict(recs)
-        return recs, pred
+            q[shut] = 0.0
+            mean[rows], std[rows] = self.predict_batch(q[rows])
+        return q, mean, std
 
 
 @dataclass
@@ -82,6 +98,14 @@ class Candidate:
 
     def active(self, hour: int) -> bool:
         return self.start is not None and self.start <= hour < self.start + self.length
+
+
+def _active(cands: list[Candidate], n_hours: int) -> np.ndarray:
+    """Block hours as a mask (candidates × hours), like ``Candidate.active``."""
+    hours = np.arange(n_hours)
+    start = np.array([-1 if c.start is None else c.start for c in cands])[:, None]
+    end = np.array([-1 if c.start is None else c.start + c.length for c in cands])[:, None]
+    return (hours >= start) & (hours < end)
 
 
 @dataclass
@@ -260,18 +284,31 @@ def plan(
         for start in range(0, min(max(horizon - length + 1, 0), latest), start_step):
             candidates.append(Candidate(start, length, continues=running and start == 0))
 
+    # all blocks of a zone in one go (candidates[0] is "no block": the free run)
+    blocks = candidates[1:]
+    batch: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+    closed_by_cand = np.zeros(len(blocks))
+    for zz in scored_zones:
+        if not blocks:
+            break
+        q, mean, std = zz.heating_batch(blocks)
+        batch[zz.name] = (mean, std)
+        if zz.capped:  # block hours with the valve shut (the room at its cap), as a share of those rooms
+            capped_hour = np.array([zz.cap_at(i) is not None for i in range(q.shape[1])])
+            closed_by_cand += (_active(blocks, q.shape[1]) & capped_hour & (q == 0.0)).sum(axis=1) / len(consumers)
+
     scored_all: list[ScoredCandidate] = []
-    for cand in candidates:
+    for k, cand in enumerate(candidates):
         preds: dict[str, Prediction] = {}
         viol: list[tuple[int, float]] = []
-        overheat = closed = 0.0
+        overheat = 0.0
+        closed = float(closed_by_cand[k - 1]) if cand.start is not None else 0.0
         for zz in scored_zones:
             if cand.start is None:
                 pred = free[zz.name]
             else:
-                recs, pred = zz.heating_prediction(cand)
-                if zz.capped:
-                    closed += zz.closed_hours(cand, recs) / len(consumers)
+                mean, std = batch[zz.name]
+                pred = Prediction(mean=mean[k - 1].tolist(), std=std[k - 1].tolist())
             if zz.leads_release:
                 preds[zz.name] = pred
                 viol += violations(pred, zz.comfort_low, z)

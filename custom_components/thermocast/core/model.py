@@ -328,6 +328,84 @@ class OnlineZoneModel:
                 hist = hist[-keep:]
         return Prediction(mean=means, std=stds, contrib=contribs)
 
+    def predict_batch(
+        self,
+        temp_now: float,
+        future: list[HourRecord],
+        q: np.ndarray,
+        var0: float = 0.0,
+        history: list[HourRecord] | None = None,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """``predict`` for many heating schedules at once (the planner's candidates).
+
+        ``q`` (schedules × hours) replaces ``future[i].q``. Returns (mean, std), each schedules × hours.
+        Only the temperature-dependent columns (loss, neighbours) and the heating lags differ between
+        schedules; everything else is built once per hour.
+        """
+        hist = list(self.history if history is None else history)
+        n_s, horizon = q.shape
+        n_h = len(hist)
+
+        def source(t: int, lag: int) -> tuple[bool, int]:
+            """Record that ``past(lag)`` of ``predict`` reads at step ``t``: (from history?, index)."""
+            if lag == 0:
+                return False, t
+            if n_h + t >= lag:
+                i = n_h + t - lag
+                return (True, i) if i < n_h else (False, i - n_h)
+            if n_h + t > 0:  # fewer records than the lag: the oldest one
+                return (True, 0) if n_h else (False, 0)
+            return False, t
+
+        # constant part per hour (the temperature-dependent columns are completed in the loop)
+        const = np.zeros((horizon, self.dim))
+        heat_from_q: list[list[tuple[int, int]]] = [[] for _ in range(horizon)]  # (column, q index) per hour
+        temp_cols: list[list[int]] = [[] for _ in range(horizon)]  # columns holding x - T
+        for t, rec in enumerate(future):
+            col = 0
+            const[t, col] = 1.0
+            const[t, col + 1] = rec.t_out
+            temp_cols[t].append(col + 1)
+            col += 2
+            for key, lags in self._surface_lags:
+                for lag in lags:
+                    from_hist, i = source(t, lag)
+                    const[t, col] = (hist[i] if from_hist else future[i]).irr.get(key, 0.0)
+                    col += 1
+            for lag in self.spec.heat_lags:
+                from_hist, i = source(t, lag)
+                if from_hist:
+                    const[t, col] = hist[i].q
+                else:
+                    heat_from_q[t].append((col, i))
+                col += 1
+            for i in range(self.spec.n_neighbors):
+                if i < len(rec.neighbors):  # a missing neighbour reads the zone itself: n - T = 0
+                    const[t, col] = rec.neighbors[i]
+                    temp_cols[t].append(col)
+                col += 1
+            for i in range(self.spec.n_gains):
+                const[t, col] = rec.gains[i] if i < len(rec.gains) else 0.0
+                col += 1
+
+        means = np.empty((n_s, horizon))
+        var = np.empty((n_s, horizon))
+        temp = np.full(n_s, float(temp_now))
+        v = np.full(n_s, float(var0))
+        sigma2 = self.resid_var
+        phi = np.empty((n_s, self.dim))
+        for t in range(horizon):
+            phi[:] = const[t]
+            for c in temp_cols[t]:
+                phi[:, c] -= temp
+            for c, i in heat_from_q[t]:
+                phi[:, c] = q[:, i]
+            temp = temp + (phi * self.theta).sum(axis=1)
+            v = v + sigma2 + ((phi @ self.P) * phi).sum(axis=1) * sigma2
+            means[:, t] = temp
+            var[:, t] = v
+        return means, np.sqrt(var)
+
     # -------------------------------------------------------------- inspection
     def params(self) -> dict[str, float]:
         return {n: float(v) for n, v in zip(self.names, self.theta)}
