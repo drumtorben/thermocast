@@ -31,6 +31,8 @@ CONF_CONFIDENCE_Z = "confidence_z"
 CONF_CALIBRATE_SIGMA = "calibrate_sigma"  # widen σ from the observed forecast errors
 CONF_STARTS_WEIGHT = "starts_weight"  # 0 = little gas … 100 = few burner starts
 DEFAULT_STARTS_WEIGHT = 80
+CONF_ANTI_CYCLE_MIN = "anti_cycle_minutes"  # boiler anti-cycling lock; 0 = don't trim block ends to it
+DEFAULT_ANTI_CYCLE_MIN = 0
 
 DEFAULT_MIN_BLOCK_H = 3
 DEFAULT_MIN_PAUSE_H = 2

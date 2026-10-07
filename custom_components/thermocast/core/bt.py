@@ -31,6 +31,7 @@ class BtInput:
     leads: bool
     last_written: float | None  # what Thermocast wrote last (None = nothing yet)
     writes_today: int
+    window_open: bool = False  # a window of the zone is open: hold the base, never charge
 
 
 def bt_decide(inp: BtInput) -> tuple[float | None, str]:
@@ -45,6 +46,8 @@ def bt_decide(inp: BtInput) -> tuple[float | None, str]:
         # room at its upper bound all night), or again for a cold leading zone
         if inp.quiet_now and settled and not cold:
             return None, "quiet"
+    elif inp.window_open:
+        target = round_target(inp.base)
     else:
         target = round_target(inp.high if inp.block_on and not inp.failsafe else inp.floor_now)
     if inp.last_written is not None and abs(inp.last_written - target) < STEP / 2:

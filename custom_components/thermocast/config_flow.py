@@ -20,6 +20,7 @@ from homeassistant.helpers import selector
 from .const import (
     CONF_ACTIVE_FROM,
     CONF_ACTIVE_TO,
+    CONF_ANTI_CYCLE_MIN,
     CONF_BASE_TEMP,
     CONF_BT_CONTROL,
     CONF_BT_ENTITY,
@@ -54,6 +55,7 @@ from .const import (
     CONF_TEMP_SENSORS,
     CONF_VALVE_ENTITY,
     CONF_WINDOW_ENTITIES,
+    DEFAULT_ANTI_CYCLE_MIN,
     DEFAULT_BASE_OFFSET,
     DEFAULT_CALIBRATE_SIGMA,
     DEFAULT_CONFIDENCE_Z,
@@ -125,6 +127,9 @@ def _options_schema(options: dict[str, Any]) -> vol.Schema:
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(min=0, max=100, step=5, mode=selector.NumberSelectorMode.SLIDER)
             ),
+            vol.Required(
+                CONF_ANTI_CYCLE_MIN, default=options.get(CONF_ANTI_CYCLE_MIN, DEFAULT_ANTI_CYCLE_MIN)
+            ): _number(0, 60, 1, "min"),
             # optional sources for the panel (DHW hatching, KPIs) – suggested, so they can be cleared
             vol.Optional(CONF_DHW_ENTITY): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain=["binary_sensor", "switch", "sensor"])

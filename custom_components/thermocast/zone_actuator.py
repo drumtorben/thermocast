@@ -92,7 +92,7 @@ class ZoneActuator:
     ) -> dict[str, dict[str, Any]]:
         """Decide (and, when ``enabled``, write) every BT-controlled zone. Returns per zone
         ``{"target", "reason", "override_until"}`` for the panel."""
-        from .coordinator import zone_base, zone_floor, zone_high, zone_quiet
+        from .coordinator import zone_base, zone_floor, zone_high, zone_quiet, zone_window_open
 
         out: dict[str, dict[str, Any]] = {}
         today = dt_util.as_local(now).date()
@@ -119,6 +119,7 @@ class ZoneActuator:
                 block_on=block_on, failsafe=failsafe, floor_now=zone_floor(z, now), high=zone_high(z),
                 base=zone_base(z), quiet_now=quiet_now, quiet_soon=not quiet_now and zone_quiet(z, now, QUIET_LEAD),
                 temp=temps.get(zid), leads=bool(z.cfg.get(CONF_LEADS_RELEASE, True)),
+                window_open=zone_window_open(self.hass, z),
                 # observe mode compares with what the thermostat has – nothing of ours was written
                 last_written=s.last_written if enabled else current, writes_today=s.writes_today,
             )

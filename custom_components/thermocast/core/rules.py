@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 
 
 @dataclass(frozen=True)
@@ -25,6 +26,20 @@ def apply_rules(
     elif not current and want and elapsed_h < rules.min_pause_h:
         return False, "min_pause"
     return want, None
+
+
+TAIL_MIN = timedelta(minutes=15)  # a burner run shorter than this at the very end of a block is not worth a start
+
+
+def trim_tail_restart(
+    now: datetime, block_end: datetime | None, last_start: datetime | None, lock: timedelta, tick: timedelta
+) -> bool:
+    """End the block now: the boiler's anti-cycling lock ends before the next update and the restart that
+    follows would only run a few minutes before the block ends anyway (one burner start saved)."""
+    if block_end is None or last_start is None:
+        return False
+    restart = last_start + lock
+    return now < restart <= now + tick and block_end - restart < TAIL_MIN
 
 
 def release_state(value: str | None, domain: str, on_value: str | None, off_value: str | None) -> bool | None:

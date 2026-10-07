@@ -162,7 +162,8 @@
           "burner_starts_entity": "Zähler Brennerstarts (optional)",
           "heat_energy_entity": "Heizenergie in kWh (optional)",
           "calibrate_sigma": "Unsicherheit kalibrieren",
-          "starts_weight": "Wenige Brennerstarts ↔ wenig Gas"
+          "starts_weight": "Wenige Brennerstarts ↔ wenig Gas",
+          "anti_cycle_minutes": "Taktsperre des Kessels"
         },
         "data_description": {
           "forgetting_factor": "0,996 ≈ 10 Tage Gedächtnis. Kleiner = passt sich schneller an, aber unruhiger.",
@@ -171,7 +172,8 @@
           "burner_starts_entity": "Gesamtzähler (State-Class total_increasing), z. B. EMS-ESP Brennerstarts. Für die KPIs.",
           "heat_energy_entity": "Gesamte Heizenergie (kWh, total_increasing), z. B. EMS-ESP Energie Heizung. Für kWh pro Heizgradtag.",
           "calibrate_sigma": "Weitet σ je Prognosehorizont so, dass ±σ etwa 68 % der in den letzten 14 Tagen beobachteten Prognosefehler abdeckt (braucht ≥ 48 Prüfungen je Horizont; verengt nie).",
-          "starts_weight": "0 = kurze Blöcke, wenig Gas; 100 = wenige lange Blöcke, die die Räume bis zur Obergrenze laden."
+          "starts_weight": "0 = kurze Blöcke, wenig Gas; 100 = wenige lange Blöcke, die die Räume bis zur Obergrenze laden.",
+          "anti_cycle_minutes": "Mindestzeit zwischen zwei Brennerstarts laut Kessel (0 = aus). Braucht den Sensor für Brennerstarts: ein Block endet dann kurz vor einem Neustart, der nur noch wenige Minuten laufen würde."
         }
       }
     }

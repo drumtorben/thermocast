@@ -62,6 +62,46 @@ async def test_quiet_hours_over_midnight(hass: HomeAssistant) -> None:
     assert zone_charge_cap(z, _local(hass, 23)) == 17.0  # quiet: the thermostat stays at the floor
 
 
+async def test_open_window_neither_leads_nor_takes_heat(hass: HomeAssistant) -> None:
+    from custom_components.thermocast.coordinator import build_plan_inputs
+    from custom_components.thermocast.core.forecast import Forecast
+
+    z = _z(**{CONF_BT_CONTROL: True, CONF_BT_ENTITY: "climate.bt", CONF_COMFORT_HIGH: 22.5, CONF_BASE_TEMP: 18.0,
+              "window_entities": ["binary_sensor.window"]})
+    hass.states.async_set("sensor.living", "20.0")
+    hass.states.async_set("sensor.kitchen", "20.0")
+    t0 = datetime(2026, 10, 7, 6, tzinfo=UTC)
+    fc = Forecast(times=[t0 + timedelta(hours=h) for h in range(8)], t_out=[5.0] * 8, irr={}, fetched_at=t0)
+    hass.states.async_set("binary_sensor.window", "off")
+    closed = build_plan_inputs(hass, {"z": z}, fc, 0, 6)[0]
+    assert closed.leads_release and closed.charge_cap[0] == 22.5
+    hass.states.async_set("binary_sensor.window", "on")
+    airing = build_plan_inputs(hass, {"z": z}, fc, 0, 6)[0]
+    assert not airing.leads_release and set(airing.charge_cap) == {18.0}
+
+
+async def test_tail_trim_reads_the_burner_starts_counter(hass: HomeAssistant) -> None:
+    from types import SimpleNamespace
+
+    from custom_components.thermocast.coordinator import ThermocastCoordinator
+
+    now = datetime(2026, 10, 7, 1, 13, tzinfo=UTC)
+    hass.states.async_set("sensor.burner_starts", "70")
+    state = hass.states.get("sensor.burner_starts")
+    object.__setattr__(state, "last_changed", now - timedelta(minutes=31))  # last start 31 min ago
+    fake = SimpleNamespace(
+        hass=hass, _started=now - timedelta(hours=5),
+        config_entry=SimpleNamespace(options={"anti_cycle_minutes": 45, "burner_starts_entity": "sensor.burner_starts"}),
+    )
+    end = now + timedelta(minutes=15)  # the restart at +14 min would run only 1 min
+    assert ThermocastCoordinator._trim_tail(fake, now, end)
+    fake.config_entry.options["anti_cycle_minutes"] = 0  # option off
+    assert not ThermocastCoordinator._trim_tail(fake, now, end)
+    fake.config_entry.options["anti_cycle_minutes"] = 45
+    fake._started = now - timedelta(minutes=30)  # counter only restored at startup
+    assert not ThermocastCoordinator._trim_tail(fake, now, end)
+
+
 async def test_quiet_from_schedule_plan_and_window(hass: HomeAssistant) -> None:
     """Quiet when the fixed window OR the schedule says so; the 15-min lead also looks into the schedule."""
     z = _z(**{CONF_QUIET_FROM: "19:00:00", CONF_QUIET_TO: "07:00:00"})

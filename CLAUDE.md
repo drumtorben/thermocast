@@ -143,6 +143,11 @@ für die Wärmepumpe später COP(T_out, Vorlauf), Strompreis, PV-Überschuss.
   Sommerschwelle fest 10 °C → ein Block heizt sicher auch an milden Tagen, Pumpe steht zwischen den Blöcken,
   bei HA-Ausfall heizt das RC310 spätestens unter 10 °C. (Schwelle 16/10 allein wirkt nur bei Modus Auto
   und nur unter 16 °C draußen; „Sommer“ als Sperre nur mit Absicherung außerhalb von HA.)
+- **Offenes Fenster** (Fenster-Entitäten der Zone): Zone führt nicht (löst keinen Block aus), ist im Planer auf den
+  Grundwert gedeckelt und der BT-Aktor hält den Grundwert; nach dem Schließen plant der nächste Lauf normal.
+- **Taktsperre** (Option `anti_cycle_minutes` + Sensor Brennerstarts): endet die Sperre vor dem nächsten Update und
+  liefe der folgende Neustart < 15 min bis Blockende, endet der Block jetzt (`trim_tail_restart`, Ereignis
+  `block_trimmed`) – spart den kurzen letzten Start.
 - BT-Aktor (opt-in je Zone): im Block Obergrenze, sonst Untergrenze; nur bei Änderung, 0,5-K-Schritte,
   15–24 °C, ≤ 24/Tag; Handeingriff → Zone ruht bis Blockende (≥ 3 h); Ruhezeit: 15 min vorher Grundwert,
   dann nichts (Ausnahme: führende Zone < Grundwert − 1 K); Steuerung aus/Entladen → Untergrenze.

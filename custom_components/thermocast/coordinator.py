@@ -22,8 +22,10 @@ from .const import (
     CALIBRATION_DAYS,
     CONF_ACTIVE_FROM,
     CONF_ACTIVE_TO,
+    CONF_ANTI_CYCLE_MIN,
     CONF_BASE_TEMP,
     CONF_BT_CONTROL,
+    CONF_BURNER_STARTS,
     CONF_CALIBRATE_SIGMA,
     CONF_COMFORT_BAND,
     CONF_COMFORT_HIGH,
@@ -48,6 +50,7 @@ from .const import (
     CONF_TEMP_SENSORS,
     CONF_VALVE_ENTITY,
     CONF_WINDOW_ENTITIES,
+    DEFAULT_ANTI_CYCLE_MIN,
     DEFAULT_BASE_OFFSET,
     DEFAULT_CALIBRATE_SIGMA,
     DEFAULT_CONFIDENCE_Z,
@@ -69,7 +72,7 @@ from .core.model import HourRecord, OnlineZoneModel, SurfaceSpec, ZoneSpec
 from .core.planner import PlanResult, ZonePlanInput, charge_cost, plan
 from .core.quality import ForecastLog, RingLog, calibration, measured_by_hour, param_snapshot, std_scale_profile
 from .core.rollout import block_lengths_for
-from .core.rules import binary_value, hvac_heating
+from .core.rules import binary_value, hvac_heating, trim_tail_restart
 from .events import EventLog
 from .view_builder import ViewBuilder
 from .zone_actuator import ZoneActuator
@@ -255,6 +258,11 @@ def zone_charge_cap(z: ZoneRuntime, when: datetime) -> float | None:
     return zone_base(z) if zone_quiet(z, when) else zone_high(z)
 
 
+def zone_window_open(hass: HomeAssistant, z: ZoneRuntime) -> bool:
+    """A window of the zone is open right now."""
+    return any(_is_on(hass, e) for e in z.cfg.get(CONF_WINDOW_ENTITIES, []))
+
+
 def build_plan_inputs(
     hass: HomeAssistant, zones: dict[str, ZoneRuntime], fc: Forecast, idx0: int, horizon: int
 ) -> list[ZonePlanInput]:
@@ -281,13 +289,18 @@ def build_plan_inputs(
         ends = [fc.times[idx0 + 1 + h] for h in range(horizon)]  # prediction h = end of hour h
         starts = [fc.times[idx0 + h] for h in range(horizon)]  # heat input of hour h
         high = zone_high(z)
+        # an open window: the room cools by airing, not for lack of heat – it neither calls for a block nor
+        # takes heat (its thermostat holds the base); after closing, the next plan recovers it as usual
+        window = zone_window_open(hass, z)
+        caps = [zone_charge_cap(z, t) for t in starts]
         inputs.append(
             ZonePlanInput(
                 name=sid, model=z.model, temp_now=temp, future=future,
                 comfort_low=[zone_floor(z, t) for t in ends],
                 comfort_high=[high] * horizon,
-                charge_cap=[zone_charge_cap(z, t) for t in starts],
-                q_on=z.q_on, leads_release=bool(z.cfg.get(CONF_LEADS_RELEASE, True)), std_scale=z.std_scale,
+                charge_cap=[zone_base(z) if window and c is not None else c for c in caps],
+                q_on=z.q_on, leads_release=bool(z.cfg.get(CONF_LEADS_RELEASE, True)) and not window,
+                std_scale=z.std_scale,
             )
         )
     return inputs
@@ -603,6 +616,9 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
         self._failsafe_active = bool(failsafe)
         self._update_failsafe_issue(now, failsafe)
         want_heat = True if failsafe else result["want_heat"]
+        if want_heat and not failsafe and not holding and self._trim_tail(now, result["block_end"]):
+            want_heat = False
+            self.events.add(now, "block_trimmed", dedupe=timedelta(hours=1))
         release, override = await self.actuator.async_apply(want_heat, self.control_enabled, now, forced=bool(failsafe))
         if failsafe:
             override = "failsafe"
@@ -632,6 +648,19 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
         )
         await self.view_builder.async_refresh(now, data_out)  # never raises
         return data_out
+
+    def _trim_tail(self, now: datetime, block_end: datetime | None) -> bool:
+        """End the block before a burner restart that would only run a few minutes (option: anti-cycling lock
+        + burner starts counter; the counter's last change is the last start)."""
+        options = self.config_entry.options
+        lock = timedelta(minutes=float(options.get(CONF_ANTI_CYCLE_MIN, DEFAULT_ANTI_CYCLE_MIN)))
+        state = self.hass.states.get(options.get(CONF_BURNER_STARTS) or "")
+        if lock <= timedelta(0) or state is None:
+            return False
+        last_start = state.last_changed
+        if last_start <= self._started + timedelta(minutes=1):  # restored at startup, not a real start
+            return False
+        return trim_tail_restart(now, block_end, last_start, lock, UPDATE_INTERVAL)
 
     def _close_hour(self, z: ZoneRuntime, temp_now: float, consecutive: bool) -> None:
         acc = z.acc

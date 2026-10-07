@@ -5,7 +5,9 @@ from __future__ import annotations
 import math
 
 from . import core_helpers  # noqa: F401  (sets sys.path for `core`)
-from core.rules import Rules, apply_rules, binary_value, release_state
+from datetime import UTC, datetime, timedelta
+
+from core.rules import Rules, apply_rules, binary_value, release_state, trim_tail_restart
 
 R = Rules(min_block_h=3, min_pause_h=2, max_switches=4)
 
@@ -23,6 +25,19 @@ def test_turn_off_respects_min_block_and_budget():
 
 def test_turn_on_ignores_budget():
     assert apply_rules(True, False, 5.0, 99, R) == (True, None)
+
+
+def test_trim_tail_restart_ends_the_block_before_a_short_last_burner_run():
+    t0 = datetime(2026, 10, 7, 0, 42, tzinfo=UTC)  # last burner start 02:42 in local terms -> here: t0
+    lock = timedelta(minutes=45)
+    end = t0 + timedelta(minutes=46)  # restart would come 1 min before the block ends
+    tick = timedelta(minutes=15)
+    assert trim_tail_restart(t0 + timedelta(minutes=31), end, t0, lock, tick)  # restart within the next tick
+    assert not trim_tail_restart(t0 + timedelta(minutes=20), end, t0, lock, tick)  # next tick decides
+    assert not trim_tail_restart(t0 + timedelta(minutes=31), t0 + timedelta(minutes=75), t0, lock, tick)  # long run
+    assert not trim_tail_restart(t0 + timedelta(minutes=50), end, t0, lock, tick)  # lock over: burner may be running
+    assert not trim_tail_restart(t0 + timedelta(minutes=31), None, t0, lock, tick)  # no block end known
+    assert not trim_tail_restart(t0 + timedelta(minutes=31), end, None, lock, tick)  # no burner start known
 
 
 def test_release_state():

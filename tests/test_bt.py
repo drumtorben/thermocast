@@ -27,6 +27,11 @@ def test_unchanged_target_is_not_written_again():
     assert bt_decide(replace(BASE, last_written=20.0)) == (None, "unchanged")
 
 
+def test_open_window_holds_the_base_even_during_a_block():
+    assert bt_decide(replace(BASE, block_on=True, window_open=True)) == (17.0, "write")
+    assert bt_decide(replace(BASE, window_open=True)) == (17.0, "write")  # also outside a block (comfort floor)
+
+
 def test_failsafe_holds_the_floor_even_during_a_block():
     assert bt_decide(replace(BASE, block_on=True, failsafe=True)) == (20.0, "write")
 
