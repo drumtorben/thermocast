@@ -7,7 +7,15 @@ import math
 from . import core_helpers  # noqa: F401  (sets sys.path for `core`)
 from datetime import UTC, datetime, timedelta
 
-from core.rules import Rules, apply_rules, binary_value, release_state, trim_tail_restart
+from core.rules import (
+    Rules,
+    apply_rules,
+    binary_value,
+    release_state,
+    trim_tail_restart,
+    window_recovering,
+    window_recovery_temp,
+)
 
 R = Rules(min_block_h=3, min_pause_h=2, max_switches=4)
 
@@ -57,3 +65,14 @@ def test_binary_value():
     assert binary_value("42") == 1.0
     assert binary_value("0") == 0.0
     assert binary_value("unknown") is None
+
+
+def test_window_recovery_plans_from_the_temperature_before_airing():
+    closed = datetime(2026, 10, 8, 5, 50, tzinfo=UTC)
+    # real case: 21.9 °C before airing, 20.9 °C after, back to 21.4 °C after 40 min
+    assert window_recovery_temp(20.9, 21.9, closed, closed + timedelta(minutes=7)) == 21.9
+    assert window_recovery_temp(22.3, 21.9, closed, closed + timedelta(minutes=30)) == 22.3  # never below the room
+    assert window_recovery_temp(20.9, 21.9, closed, closed + timedelta(minutes=60)) == 20.9  # recovery over
+    assert window_recovery_temp(20.9, None, closed, closed + timedelta(minutes=7)) == 20.9  # nothing known before
+    assert window_recovery_temp(20.9, 21.9, None, closed) == 20.9  # never aired
+    assert window_recovering(closed, closed) and not window_recovering(closed, closed - timedelta(minutes=1))

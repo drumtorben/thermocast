@@ -92,8 +92,12 @@ Optional setzt Thermocast je Zone den Sollwert von **Better Thermostat** (im Blo
 Untergrenze), mit **Ruhezeiten** (fest und/oder `schedule`-Helfer) ohne Stellgeräusche und Respekt vor Handeingriffen.
 
 - **Offenes Fenster** (Fenster-Entitäten der Zone): die Zone löst keinen Block aus, nimmt im Plan keine Wärme
-  und ihr Thermostat bleibt auf dem Grundwert – gelüftet wird nicht gegen die Heizung. Nach dem Schließen plant
-  der nächste Lauf die Wiederaufheizung.
+  und ihr Thermostat bleibt auf dem Grundwert – gelüftet wird nicht gegen die Heizung. Lüften kühlt die Luft,
+  nicht die Wände: Eine Stunde nach dem Schließen plant Thermocast ab der Temperatur vor dem Öffnen, kurzes
+  Stoßlüften löst also keinen Block aus. Fensterwechsel werden live verfolgt (auch Lüften zwischen zwei Updates);
+  weder das Lüften noch die Stunde danach wird gelernt.
+- **Neues oder zurückgesetztes Zonenmodell** (Zone neu, Flächen/Sensoren geändert): Die Freigabe bleibt, wie sie
+  war, bis das Modell aus der Recorder-Historie gelernt hat (wenige Sekunden nach dem Neuladen).
 - **Taktsperre** (Option, mit Sensor *Brennerstarts*): Würde der Kessel nach seiner Sperrzeit nur noch wenige
   Minuten vor Blockende neu starten, endet der Block kurz davor – ein Start gespart.
 - **Mindestblock** begrenzt nur, wann ein laufender Block frühestens enden darf; geplant werden Blöcke ab 2 h.

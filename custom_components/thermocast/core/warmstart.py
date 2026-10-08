@@ -54,7 +54,8 @@ def build_records(inp: WarmstartInputs, surface_keys: list[str]) -> list[tuple[d
                 q *= (valve / 100.0) if valve is not None else 0.0
         neighbors = tuple(v if (v := _at(n, i)) is not None else temp for n in inp.neighbors)
         gains = tuple(v if (v := _at(g, i)) is not None else 0.0 for g in inp.gains)
-        window_open = any((_at(w, i) or 0.0) > 0 for w in inp.window)
+        # aired in this hour, in the next (its mean is the end temperature) or the last (the air still recovers)
+        window_open = any((_at(w, j) or 0.0) > 0 for w in inp.window for j in (i - 1, i, i + 1) if j >= 0)
         valid = (
             temp is not None
             and nxt is not None

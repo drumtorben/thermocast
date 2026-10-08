@@ -126,5 +126,5 @@ Eine Zone = ein Raum oder eine Gruppe von Räumen am selben Heizkreis. Faustrege
 - Fällt HA aus, während „gesperrt“ gesetzt ist: das RC310 heizt bei Kälte (< 10 °C gedämpft) von selbst.
   Better Thermostat läuft in HA – die TRVs behalten dann ihren letzten Sollwert.
 - Fenster-Entitäten je Zone eintragen: bei offenem Fenster löst die Zone keinen Block aus und ihr Thermostat bleibt
-  auf dem Grundwert.
+  auf dem Grundwert; eine Stunde nach dem Schließen plant Thermocast ab der Temperatur vor dem Lüften.
 - *Diagnose herunterladen* (⋮ an der Integration) liefert alle Modelle, Logs und Ereignisse für die Analyse.

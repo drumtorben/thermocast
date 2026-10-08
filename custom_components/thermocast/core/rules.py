@@ -42,6 +42,24 @@ def trim_tail_restart(
     return now < restart <= now + tick and block_end - restart < TAIL_MIN
 
 
+WINDOW_RECOVERY = timedelta(hours=1)  # airing cools the air, not the walls: the air is back within ~45 min
+
+
+def window_recovering(closed_at: datetime | None, now: datetime, recovery: timedelta = WINDOW_RECOVERY) -> bool:
+    """A window of the zone closed less than ``recovery`` ago."""
+    return closed_at is not None and timedelta(0) <= now - closed_at < recovery
+
+
+def window_recovery_temp(
+    temp: float, before: float | None, closed_at: datetime | None, now: datetime, recovery: timedelta = WINDOW_RECOVERY
+) -> float:
+    """Temperature to plan from: after airing, the walls and furniture warm the air back up within the hour –
+    until then the temperature from before the window opened counts (never less than the measurement)."""
+    if before is None or not window_recovering(closed_at, now, recovery):
+        return temp
+    return max(temp, before)
+
+
 def release_state(value: str | None, domain: str, on_value: str | None, off_value: str | None) -> bool | None:
     """Interpret a state of the release entity: True = heating allowed, None = unknown."""
     if value is None or value in ("unknown", "unavailable"):

@@ -144,7 +144,14 @@ für die Wärmepumpe später COP(T_out, Vorlauf), Strompreis, PV-Überschuss.
   bei HA-Ausfall heizt das RC310 spätestens unter 10 °C. (Schwelle 16/10 allein wirkt nur bei Modus Auto
   und nur unter 16 °C draußen; „Sommer“ als Sperre nur mit Absicherung außerhalb von HA.)
 - **Offenes Fenster** (Fenster-Entitäten der Zone): Zone führt nicht (löst keinen Block aus), ist im Planer auf den
-  Grundwert gedeckelt und der BT-Aktor hält den Grundwert; nach dem Schließen plant der nächste Lauf normal.
+  Grundwert gedeckelt und der BT-Aktor hält den Grundwert. Fensterwechsel per State-Change-Listener
+  (`async_track_windows`); nach dem Schließen 1 h **Nachlauf** (`WINDOW_RECOVERY`): Planer startet ab
+  `max(gemessen, Temperatur vor dem Öffnen)` (`window_recovery_temp`, Ereignis `window_recovery`), Stunden mit
+  Lüften oder Nachlauf werden nicht gelernt (Warmstart: Stunde davor/danach auch nicht). Anlass: 10 min Stoßlüften
+  −1 K, nach 40 min wieder +0,5 K – ohne Nachlauf plante die Zone sofort einen Block.
+- **Warmstart-Halten:** Zone mit Modell auf dem Prior (neu/zurückgesetzt) → bis der Warmstart nach dem Setup fertig
+  ist (≤ 10 min), hält der Aktor den gespeicherten Zustand (Override `warmstart`). Anlass: Flächen geändert →
+  Reset → Prior-Plan schaltete den Kessel ein, 3 s bevor der Warmstart fertig war (dann 1 h Mindestblock).
 - **Taktsperre** (Option `anti_cycle_minutes` + Sensor Brennerstarts): endet die Sperre vor dem nächsten Update und
   liefe der folgende Neustart < 15 min bis Blockende, endet der Block jetzt (`trim_tail_restart`, Ereignis
   `block_trimmed`) – spart den kurzen letzten Start.

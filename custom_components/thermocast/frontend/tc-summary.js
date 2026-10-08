@@ -119,7 +119,7 @@ class TcSummary extends LitElement {
   render() {
     if (!this.view) return nothing;
     const o = this.view.decision.override;
-    const overrideNote = ["min_block", "min_pause", "budget", "startup"].includes(o)
+    const overrideNote = ["min_block", "min_pause", "budget", "startup", "warmstart"].includes(o)
       ? html`<p class="note">${t(this.lang, "override_" + o)}</p>`
       : nothing;
     return html`

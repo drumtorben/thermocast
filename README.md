@@ -101,7 +101,12 @@ bound otherwise), with **quiet times** (fixed and/or a `schedule` helper) withou
 manual changes.
 
 - **Open window** (window entities of the zone): the zone does not call for a block, takes no heat in the plan,
-  and its thermostat holds the base temperature. After closing, the next plan recovers the room.
+  and its thermostat holds the base temperature. Airing cools the air, not the walls: for an hour after closing
+  the plan starts from the temperature before the window opened, so a short airing does not trigger a block.
+  Window changes are followed live (an airing between two updates counts too); neither the airing nor the hour
+  after it is learned.
+- **New or reset zone model** (zone added, surfaces/sensors changed): the release stays as it was until the
+  model has learned from the recorder history (a few seconds after the reload).
 - **Anti-cycling lock** (option, needs a burner starts sensor): if the boiler's restart after its lock would only
   run a few minutes before the block ends, the block ends just before it – one start saved.
 - **Minimum block** only limits how early a running block may end; blocks are planned from 2 h.

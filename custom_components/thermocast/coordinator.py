@@ -10,9 +10,10 @@ from statistics import fmean
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import CALLBACK_TYPE, Event, EventStateChangedData, HomeAssistant, callback
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
@@ -72,7 +73,7 @@ from .core.model import HourRecord, OnlineZoneModel, SurfaceSpec, ZoneSpec
 from .core.planner import PlanResult, ZonePlanInput, charge_cost, plan
 from .core.quality import ForecastLog, RingLog, calibration, measured_by_hour, param_snapshot, std_scale_profile
 from .core.rollout import block_lengths_for
-from .core.rules import binary_value, hvac_heating, trim_tail_restart
+from .core.rules import binary_value, hvac_heating, trim_tail_restart, window_recovering, window_recovery_temp
 from .events import EventLog
 from .view_builder import ViewBuilder
 from .zone_actuator import ZoneActuator
@@ -85,6 +86,7 @@ FAILSAFE_ISSUE_AFTER = timedelta(hours=1)
 STARTUP_GRACE = timedelta(minutes=5)  # after a start: missing sensors/forecast hold the state for this long
 STARTUP_RECHECK = timedelta(minutes=1)  # … and are checked again every minute
 STARTUP_HOLD_REASONS = ("no_temperature", "no_forecast", "forecast_gap", "no_zones")
+WARMSTART_HOLD_MAX = timedelta(minutes=10)  # a zone model on its prior holds the release until the warm start
 RELOADING = "reloading"  # set by the update listener: the next unload is a self-reload, not a removal
 FORECAST_CACHE = "forecast"  # entry id -> Forecast: a reload reuses a fresh forecast instead of fetching again
 
@@ -159,6 +161,11 @@ class ZoneRuntime:
     std_scale: tuple[float, ...] = ()  # calibrated σ factor per hour ahead (from the forecast log)
     schedule_plan: dict[str, list[dict[str, Any]]] | None = None  # weekly plan of the comfort schedule
     quiet_plan: dict[str, list[dict[str, Any]]] | None = None  # weekly plan of the quiet-time schedule
+    # airing (window entities, tracked by state change – a short airing often falls between two updates)
+    window_open: bool = False
+    window_seen: bool = False  # opened since the last sample
+    window_before: float | None = None  # zone temperature when the window opened
+    window_closed: datetime | None = None  # last close: the air recovers from the walls for a while
 
     def reset_acc(self) -> None:
         self.acc = {"t_out": [], "q": [], "neighbors": [], "gains": [], "window": []}
@@ -264,6 +271,15 @@ def zone_window_open(hass: HomeAssistant, z: ZoneRuntime) -> bool:
     return any(_is_on(hass, e) for e in z.cfg.get(CONF_WINDOW_ENTITIES, []))
 
 
+def zone_temp(hass: HomeAssistant, z: ZoneRuntime) -> float | None:
+    return _mean([_num(hass, e) for e in z.cfg.get(CONF_TEMP_SENSORS, [])])
+
+
+def zone_airing(hass: HomeAssistant, z: ZoneRuntime, now: datetime) -> bool:
+    """A window is open or closed only recently: the air temperature says little about the stored heat."""
+    return zone_window_open(hass, z) or window_recovering(z.window_closed, now)
+
+
 def build_plan_inputs(
     hass: HomeAssistant, zones: dict[str, ZoneRuntime], fc: Forecast, idx0: int, horizon: int
 ) -> list[ZonePlanInput]:
@@ -272,11 +288,14 @@ def build_plan_inputs(
     Prediction i refers to the end of hour i, i.e. ``fc.times[idx0 + 1 + i]`` (comfort is evaluated there).
     """
     horizon = max(0, min(horizon, len(fc.times) - idx0 - 1))
+    now = dt_util.utcnow()
     inputs: list[ZonePlanInput] = []
     for sid, z in zones.items():
-        temp = _mean([_num(hass, e) for e in z.cfg.get(CONF_TEMP_SENSORS, [])])
+        temp = zone_temp(hass, z)
         if temp is None:
             continue
+        # just aired: the drop is the air, not the stored heat – plan from the temperature before the airing
+        temp = window_recovery_temp(temp, z.window_before, z.window_closed, now)
         neighbors = tuple(
             (v if (v := _num(hass, e)) is not None else temp) for e in z.cfg.get(CONF_NEIGHBOR_SENSORS, [])
         )
@@ -291,7 +310,7 @@ def build_plan_inputs(
         starts = [fc.times[idx0 + h] for h in range(horizon)]  # heat input of hour h
         high = zone_high(z)
         # an open window: the room cools by airing, not for lack of heat – it neither calls for a block nor
-        # takes heat (its thermostat holds the base); after closing, the next plan recovers it as usual
+        # takes heat (its thermostat holds the base); after closing, it plans from the temperature before
         window = zone_window_open(hass, z)
         caps = [zone_charge_cap(z, t) for t in starts]
         inputs.append(
@@ -331,6 +350,7 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
         self.control_since: datetime | None = None
         self._started = dt_util.utcnow()  # startup grace: sensors may come back a little later
         self._warmstart_running = False
+        self.warmstart_pending = False  # a zone starts from its prior: hold the release until the warm start
         self._failsafe_since: datetime | None = None
         self._failsafe_issue = False
         self._schedules_hour: datetime | None = None
@@ -370,6 +390,9 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
                     zr.pending_hour = datetime.fromisoformat(pending["hour"])
                     zr.pending_temp = pending.get("temp")
                     zr.acc = {k: list(v) for k, v in pending.get("acc", {}).items()} or zr.acc
+                window = saved.get("window") or {}  # a reload within the recovery hour keeps it
+                zr.window_before = window.get("before")
+                zr.window_closed = datetime.fromisoformat(window["closed"]) if window.get("closed") else None
             zlog = logs.get(subentry.subentry_id) or saved or {}  # logs lived in the main store in 0.3.0
             zr.log.load(zlog.get("log", []))
             zr.flog.load(zlog.get("flog", {}))
@@ -378,6 +401,8 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
             self.zones[subentry.subentry_id] = zr
         cs = stored.get("control_since")
         self.control_since = datetime.fromisoformat(cs) if cs else None
+        # a new or reset zone would plan with its prior until the warm start (setup runs it in the background)
+        self.warmstart_pending = any(z.model.n_updates == 0 for z in self.zones.values())
         # _ensure_forecast still checks its age and whether it covers every surface
         self.forecast = self.hass.data.get(DOMAIN, {}).get(FORECAST_CACHE, {}).pop(self.config_entry.entry_id, None)
 
@@ -441,6 +466,10 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
                         "temp": z.pending_temp,
                         "acc": z.acc,
                     },
+                    "window": {
+                        "before": z.window_before,
+                        "closed": z.window_closed.isoformat() if z.window_closed else None,
+                    },
                 }
                 for sid, z in self.zones.items()
             },
@@ -480,7 +509,35 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
         await self.async_request_refresh()
 
     def zone_temps(self) -> dict[str, float | None]:
-        return {sid: _mean([_num(self.hass, e) for e in z.cfg.get(CONF_TEMP_SENSORS, [])]) for sid, z in self.zones.items()}
+        return {sid: zone_temp(self.hass, z) for sid, z in self.zones.items()}
+
+    @callback
+    def async_track_windows(self) -> CALLBACK_TYPE:
+        """Follow the window entities by state change: a short airing often falls between two updates."""
+        for z in self.zones.values():
+            z.window_open = zone_window_open(self.hass, z)
+        ids = sorted({e for z in self.zones.values() for e in z.cfg.get(CONF_WINDOW_ENTITIES, [])})
+        if not ids:
+            return lambda: None
+        return async_track_state_change_event(self.hass, ids, self._window_changed)
+
+    @callback
+    def _window_changed(self, event: Event[EventStateChangedData]) -> None:
+        now = dt_util.utcnow()
+        for z in self.zones.values():
+            if event.data["entity_id"] not in z.cfg.get(CONF_WINDOW_ENTITIES, []):
+                continue
+            is_open = zone_window_open(self.hass, z)
+            if is_open and not z.window_open:
+                z.window_seen = True
+                # aired again within the recovery hour: the temperature from before the first airing still counts
+                if z.window_before is None or not window_recovering(z.window_closed, now):
+                    z.window_before = zone_temp(self.hass, z)
+            elif not is_open and z.window_open:
+                z.window_closed = now
+                detail = f"{z.window_before:.1f} °C" if z.window_before is not None else None
+                self.events.add(now, "window_recovery", zone=z.subentry_id, detail=detail)
+            z.window_open = is_open
 
     async def async_warmstart(self, only_fresh: bool) -> dict[str, int]:
         """Learn zone models from recorder history (see warmstart.py). Never raises."""
@@ -489,17 +546,21 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
         if self._warmstart_running:
             return {}
         self._warmstart_running = True
+        result: dict[str, int] = {}
         try:
             result = await async_warmstart(self, only_fresh)
         except Exception:
             _LOGGER.exception("Thermocast warm start failed")
-            return {}
         finally:
             self._warmstart_running = False
+            held, self.warmstart_pending = self.warmstart_pending, False
         if any(result.values()):
             await self.async_save()
             self.view_builder.invalidate()
-            await self.async_request_refresh()
+        if any(result.values()) or held:
+            # plan with the learned model (and end the hold) – directly: a debounced request would delay
+            # the next requested refresh (e.g. switching control on right after the setup)
+            await self.async_refresh()
         return result
 
     @property
@@ -527,6 +588,15 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
             failsafe is not None
             and failsafe.split(":", 1)[0] in STARTUP_HOLD_REASONS
             and now - self._started < STARTUP_GRACE
+            and self.actuator.commanded is not None
+        )
+
+    def _warmstart_hold(self, now: datetime) -> bool:
+        """A new or reset zone model is still on its prior (the warm start runs right after the setup) –
+        its plan means nothing yet: hold the stored release instead of switching on it."""
+        return (
+            self.warmstart_pending
+            and now - self._started < WARMSTART_HOLD_MAX
             and self.actuator.commanded is not None
         )
 
@@ -579,13 +649,13 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
 
         hour_closed = False
         for z in self.zones.values():
-            temp = _mean([_num(hass, e) for e in z.cfg.get(CONF_TEMP_SENSORS, [])])
+            temp = zone_temp(hass, z)
             if temp is None:
                 continue
             # 1) close the previous hour -> one RLS step
             if z.pending_hour is not None and hour > z.pending_hour:
                 try:
-                    self._close_hour(z, temp, consecutive=(hour - z.pending_hour) == timedelta(hours=1))
+                    self._close_hour(z, temp, now, consecutive=(hour - z.pending_hour) == timedelta(hours=1))
                 except Exception:  # lose this hour, never get stuck on it (it would fail again every 15 min)
                     _LOGGER.exception("Thermocast: closing the hour failed for zone %s, skipping it", z.title)
                 hour_closed = True
@@ -603,13 +673,17 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
             z.acc["q"].append(q)
             z.acc["neighbors"].append([_num(hass, e) for e in z.cfg.get(CONF_NEIGHBOR_SENSORS, [])])
             z.acc["gains"].append([_or(_num(hass, e), 0.0) for e in z.cfg.get(CONF_GAIN_ENTITIES, [])])
-            z.acc["window"].append(any(_is_on(hass, e) for e in z.cfg.get(CONF_WINDOW_ENTITIES, [])))
+            # aired since the last sample, open now or still recovering: the hour is not learned
+            z.acc["window"].append(z.window_seen or zone_airing(hass, z, now))
+            z.window_seen = False
 
         result = await self._forecast_and_plan(now)
         failsafe = result.pop("failsafe")
         holding = self._startup_hold(now, failsafe)
-        if holding:
-            # sensors/forecast not back yet after a start: keep the stored state, look again in a minute
+        learning = not failsafe and not holding and self._warmstart_hold(now)
+        if holding or learning:
+            # sensors/forecast not back yet after a start, or a zone model not learned yet: keep the stored
+            # state (the former is checked again in a minute, the warm start refreshes when it is done)
             failsafe = None
             result["want_heat"] = bool(self.actuator.commanded)
         if failsafe and not self._failsafe_active:
@@ -620,7 +694,7 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
         self._failsafe_active = bool(failsafe)
         self._update_failsafe_issue(now, failsafe)
         want_heat = True if failsafe else result["want_heat"]
-        if want_heat and not failsafe and not holding and self._trim_tail(now, result["block_end"]):
+        if want_heat and not failsafe and not holding and not learning and self._trim_tail(now, result["block_end"]):
             want_heat = False
             self.events.add(now, "block_trimmed", dedupe=timedelta(hours=1))
         release, override = await self.actuator.async_apply(want_heat, self.control_enabled, now, forced=bool(failsafe))
@@ -628,6 +702,8 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
             override = "failsafe"
         elif holding:
             override = "startup"
+        elif learning:
+            override = "warmstart"
         bt = await self.zone_actuator.async_apply(
             self.zones, self.zone_temps(), block_on=release, failsafe=bool(failsafe), enabled=self.control_enabled,
             now=now, block_end=result["block_end"],
@@ -666,7 +742,7 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
             return False
         return trim_tail_restart(now, block_end, last_start, lock, UPDATE_INTERVAL)
 
-    def _close_hour(self, z: ZoneRuntime, temp_now: float, consecutive: bool) -> None:
+    def _close_hour(self, z: ZoneRuntime, temp_now: float, now: datetime, consecutive: bool) -> None:
         acc = z.acc
         n_nb = len(z.cfg.get(CONF_NEIGHBOR_SENSORS, []))
         n_g = len(z.cfg.get(CONF_GAIN_ENTITIES, []))
@@ -679,7 +755,9 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
                 irr = self.forecast.irr_at(idx)
         t_out = _mean(acc["t_out"])
         q = _or(_mean(acc["q"]), 0.0)
-        valid = consecutive and t_out is not None and not any(acc["window"]) and bool(irr or not z.model.spec.surfaces)
+        # the end temperature is disturbed too while a window is open or the air still recovers
+        aired = any(acc["window"]) or z.window_seen or zone_airing(self.hass, z, now)
+        valid = consecutive and t_out is not None and not aired and bool(irr or not z.model.spec.surfaces)
         if any(acc["window"]):
             self.events.add(dt_util.utcnow(), "window_open", zone=z.subentry_id, dedupe=timedelta(minutes=59))
         rec = HourRecord(

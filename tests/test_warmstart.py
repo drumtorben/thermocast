@@ -47,7 +47,11 @@ def test_missing_data_and_open_windows_are_not_learned():
     inp.window = [[0.0] * 8 + [0.5, 0.0]]
     recs = build_records(inp, ["90_90", "40_180"])
     invalid = [i for i, (_, rec, _) in enumerate(recs) if not rec.valid]
-    assert invalid == [2, 3, 6, 8]  # temp_next missing, temp missing, t_out missing, window open
+    # temp_next missing, temp missing, t_out missing, aired in the next hour (end temperature), window open
+    assert invalid == [2, 3, 6, 7, 8]
+    inp.window = [[0.0, 1.0] + [0.0] * 8]
+    after = [i for i, (_, rec, _) in enumerate(build_records(inp, ["90_90", "40_180"])) if not rec.valid]
+    assert after[:3] == [0, 1, 2]  # before, during and after the airing (the air still recovers)
     recs_no_irr = build_records(_inputs(sim, 5), ["90_90", "90_270"])  # unknown orientation
     assert not any(rec.valid for _, rec, _ in recs_no_irr)
 
