@@ -180,7 +180,7 @@ Attr. Parameter + Sonnenantwort je Fläche).
 
 ---
 
-## 4. Status (v0.7.5)
+## 4. Status (v0.7.6)
 
 - ✅ Kern getestet auf synthetischen Daten: 1-Schritt-MAE ≈ 0,03 K/h, 24-h-Prognose-MAE ≈ 0,1 K,
   Ostfenster und Süddach werden getrennt gelernt, Planer heizt bei −5 °C, nicht bei 18 °C.
@@ -236,7 +236,8 @@ Attr. Parameter + Sonnenantwort je Fläche).
   v0.7.2: Performance – Reload ohne View-Neubau/Prognose-Abruf, Planer vektorisiert (Rollout ~10× schneller);
   v0.7.3: Lüft-Nachlauf (1 h ab Temperatur vor dem Öffnen, Fenster per Listener), Warmstart-Halten nach Modell-Reset;
   v0.7.4: `q_on` nur aus Blockstunden (Pumpe ≥ 75 %), Kosten pro Tag ab jetzt → Blöcke so spät wie möglich;
-  v0.7.5: Panel-View bei jedem Update neu (vorher stündlich; Warmstart während eines Baus ging verloren).
+  v0.7.5: Panel-View bei jedem Update neu (vorher stündlich; Warmstart während eines Baus ging verloren);
+  v0.7.6: Zehrzeit hinter dem Horizont bis 48 h, Open-Meteo nacheinander mit 429-Retry.
   Erkenntnis an der Anlage: an milden Tagen liefert die witterungsgeführte Kurve kaum Vorlauf → Fußpunkt anheben
   (README); längere Fenster-Verzögerungen (0–3 h) getestet und verworfen (MAE minimal schlechter).
 - Bekannte Schwächen:
