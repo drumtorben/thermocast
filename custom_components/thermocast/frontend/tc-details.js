@@ -17,8 +17,23 @@ class TcDetails extends LitElement {
     const L = this.lang;
     const rows = this.view.candidates;
     if (!rows.length) return nothing;
-    const overheat = rows.some((c) => "overheat" in c.parts);
-    const cycling = rows.some((c) => (c.parts.cycling ?? 0) > 0);
+    // cost parts: shown when any candidate has a non-zero value (delay is legacy, mostly 0);
+    // a part that is equal for all candidates decides nothing → greyed out
+    const parts = [
+      ["comfort", "c_comfort", null],
+      ["overheat", "c_overheat", null],
+      ["start", "c_start", null],
+      ["cycling", "c_cycling", "c_cycling_hint"],
+      ["energy", "c_energy", null],
+      ["delay", "c_delay", null],
+    ]
+      .filter(([k]) => k === "comfort" || rows.some((c) => (c.parts[k] ?? 0) !== 0))
+      .map(([k, label, hint]) => {
+        const v0 = rows[0].parts[k] ?? 0;
+        const same = rows.length > 1 && rows.every((c) => Math.abs((c.parts[k] ?? 0) - v0) < 0.005);
+        return { k, label, hint, same };
+      });
+    const title = (p) => [p.hint && t(L, p.hint), p.same && t(L, "c_same_hint")].filter(Boolean).join(" · ") || nothing;
     return html`<div class="card">
       <h3>${t(L, "candidates")}</h3>
       <div class="scroll">
@@ -26,14 +41,9 @@ class TcDetails extends LitElement {
           <thead>
             <tr>
               <th>${t(L, "c_block")}</th>
+              <th title=${t(L, "c_total_hint")}>${t(L, "c_total")}</th>
               <th>${t(L, "c_violation")}</th>
-              <th>${t(L, "c_comfort")}</th>
-              ${overheat ? html`<th>${t(L, "c_overheat")}</th>` : nothing}
-              <th>${t(L, "c_start")}</th>
-              ${cycling ? html`<th title=${t(L, "c_cycling_hint")}>${t(L, "c_cycling")}</th>` : nothing}
-              <th>${t(L, "c_energy")}</th>
-              <th>${t(L, "c_delay")}</th>
-              <th>${t(L, "c_total")}</th>
+              ${parts.map((p) => html`<th class=${p.same ? "same" : ""} title=${title(p)}>${t(L, p.label)}</th>`)}
             </tr>
           </thead>
           <tbody @mouseleave=${() => this._hover(null)}>
@@ -45,14 +55,11 @@ class TcDetails extends LitElement {
                   @click=${() => this._hover(i)}
                 >
                   <td>${this._block(c)}</td>
-                  <td>${fmtNum(c.violation_kh, L, 2)}</td>
-                  <td>${fmtNum(c.parts.comfort ?? 0, L, 2)}</td>
-                  ${overheat ? html`<td>${fmtNum(c.parts.overheat ?? 0, L, 2)}</td>` : nothing}
-                  <td>${fmtNum(c.parts.start ?? 0, L, 2)}</td>
-                  ${cycling ? html`<td>${fmtNum(c.parts.cycling ?? 0, L, 2)}</td>` : nothing}
-                  <td>${fmtNum(c.parts.energy ?? 0, L, 2)}</td>
-                  <td>${fmtNum(c.parts.delay ?? 0, L, 2)}</td>
                   <td><b>${fmtNum(c.cost, L, 2)}</b></td>
+                  <td>${fmtNum(c.violation_kh, L, 2)}</td>
+                  ${parts.map(
+                    (p) => html`<td class=${p.same ? "same" : ""}>${fmtNum(c.parts[p.k] ?? 0, L, 2)}</td>`,
+                  )}
                 </tr>`,
             )}
           </tbody>
@@ -137,6 +144,9 @@ class TcDetails extends LitElement {
     }
     tbody tr:hover {
       background: var(--secondary-background-color, #f2f2f2);
+    }
+    .same {
+      opacity: 0.45;
     }
     tr.chosen {
       background: rgba(0, 158, 115, 0.15);
