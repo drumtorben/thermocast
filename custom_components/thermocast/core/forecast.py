@@ -61,8 +61,8 @@ async def fetch_forecast(
 ) -> Forecast:
     """Fetch temperature + global tilted irradiance for every unique orientation.
 
-    Open-Meteo accepts one tilt/azimuth per request, so we issue one request per
-    orientation – concurrently (they are tiny and cached by the caller).
+    Open-Meteo accepts one tilt/azimuth per request, so we issue one request per orientation – one after the
+    other: fired concurrently, the burst was answered with 429 (Too Many Requests) every few hours.
     """
     base = {
         "latitude": latitude,
@@ -77,8 +77,9 @@ async def fetch_forecast(
     for key, tilt, azimuth in orientations:
         if key != "0_0":
             unique.setdefault(key, (tilt, azimuth))
-    requests = [_get(session, {**base, "hourly": "temperature_2m,shortwave_radiation"})] + [
-        _get(session, {
+    data = await _get(session, {**base, "hourly": "temperature_2m,shortwave_radiation"})
+    tilted = [
+        await _get(session, {
             **base,
             "hourly": "global_tilted_irradiance",
             "tilt": round(tilt, 1),
@@ -86,7 +87,6 @@ async def fetch_forecast(
         })
         for tilt, azimuth in unique.values()
     ]
-    data, *tilted = await asyncio.gather(*requests)
 
     # temperature (+ horizontal irradiance as fallback key "0_0")
     fc.times = _parse_times(data["hourly"]["time"])
@@ -97,7 +97,14 @@ async def fetch_forecast(
     return fc
 
 
+RETRY_DELAYS: tuple[float, ...] = (5.0, 20.0)  # waits before retrying a 429 (Too Many Requests)
+
+
 async def _get(session: Any, params: dict[str, Any]) -> dict[str, Any]:
-    async with session.get(OPEN_METEO_URL, params=params, timeout=30) as resp:
-        resp.raise_for_status()
-        return await resp.json()
+    for delay in (*RETRY_DELAYS, None):
+        async with session.get(OPEN_METEO_URL, params=params, timeout=30) as resp:
+            if resp.status != 429 or delay is None:
+                resp.raise_for_status()
+                return await resp.json()
+        await asyncio.sleep(delay)
+    raise AssertionError("unreachable")

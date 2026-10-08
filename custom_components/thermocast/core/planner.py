@@ -220,10 +220,11 @@ def _counted(
     return total, coast
 
 
-def _coast_beyond(preds: dict[str, Prediction], zones: list[ZonePlanInput], z: float, cap_h: float = 24.0) -> float:
+def _coast_beyond(preds: dict[str, Prediction], zones: list[ZonePlanInput], z: float, cap_h: float = 48.0) -> float:
     """Hours the stored heat still lasts after the horizon: (end temperature − lower bound) / cooling rate
     of the last 3 h, the shortest over the leading zones. Lets the planner value a longer charge
-    that already covers the whole horizon."""
+    that already covers the whole horizon. The cap is generous: at 24 h every block that covers the
+    horizon hit it, all start times cost the same and the later block lost its advantage."""
     out = cap_h
     for zz in zones:
         pred = preds.get(zz.name)
@@ -322,7 +323,9 @@ def plan(
         parts = cost_fn(cand, violation, overheat, coast, closed)
         scored_all.append(ScoredCandidate(cand, sum(parts.values()), parts, violation, preds))
 
-    ranked = sorted(scored_all, key=lambda s: s.cost)  # stable: ties keep search order
+    # stable: ties keep search order (early starts first). Not "later wins on a tie": with violations left to
+    # the next block, every short block before the gap ties, and the latest one leaves the next block no time
+    ranked = sorted(scored_all, key=lambda s: s.cost)
     best = ranked[0]
     planned: dict[str, Prediction] = {}
     for zz in zones:

@@ -161,6 +161,20 @@ def test_mild_weather_needs_few_blocks_whatever_the_weight():
         assert n <= 2 and dip < 0.15
 
 
+def test_coast_beyond_the_horizon_does_not_saturate_at_a_day():
+    """Real case: every block covering the horizon hit the old 24 h cap – all start times cost the same and the
+    earliest won. A block that leaves more heat at the horizon end must stay ahead."""
+    from core.model import Prediction
+    from core.planner import _coast_beyond
+
+    zone = _zone(t_out=10.0, hours=24)
+    slow = [21.0 - 0.02 * i for i in range(24)]  # 0.02 K/h, 0.54 K above 20 at the end → 27 h
+    warmer = [v + 0.3 for v in slow]  # the later block: 0.3 K more at the end → 42 h
+    a = _coast_beyond({"z": Prediction(mean=slow, std=[0.0] * 24)}, [zone], 0.0)
+    b = _coast_beyond({"z": Prediction(mean=warmer, std=[0.0] * 24)}, [zone], 0.0)
+    assert 24.0 < a < b <= 48.0
+
+
 def test_late_block_wins_when_the_heat_is_needed_late():
     """Nothing needed for 14 h: charging now buys no pause the house would not have had anyway – the planner
     waits and charges shortly before the need (less heat lost on the way)."""

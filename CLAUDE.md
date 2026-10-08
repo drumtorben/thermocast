@@ -54,7 +54,8 @@ Hausspezifisches (Familie, Räume, Verbrauch, Ort, Zonenplan) steht in **`CLAUDE
 custom_components/thermocast/
 ├── core/                 # reines Python + numpy, KEIN HA-Import (Notebook/Test-tauglich)
 │   ├── model.py          # OnlineZoneModel: ARX-Grey-Box + RLS, SurfaceSpec, ZoneSpec, HourRecord
-│   ├── forecast.py       # Open-Meteo: temperature_2m + global_tilted_irradiance je (tilt, azimuth)
+│   ├── forecast.py       # Open-Meteo: temperature_2m + global_tilted_irradiance je (tilt, azimuth);
+│   │                     #   nacheinander + 429-Retry (5/20 s) – parallel gab es alle paar Stunden 429
 │   ├── planner.py        # Blockplaner: kein Block | Start 0..H × Länge {2,…,12} h, Ober-/Untergrenze,
 │   │                     #   Lade-Deckel (charge_cap), CostFn(cand, K·h kalt, K·h warm, Zehrzeit, zu-Anteil) → Komponenten
 │   ├── bt.py             # Better-Thermostat-Sollwert als reine Entscheidung (Laden/Untergrenze/Ruhezeit)
@@ -125,7 +126,9 @@ Live und im Rollout: `charge_cost(w)` („Laden & Zehren“, Spec `docs/superpow
   nächsten Mittag, ein 2-h-Block am Vormittag reichte. Synthetisch: bei milden Tagen weniger Starts *und* Gas.
 - Untergrenze = Komfort − Band in der Komfortzeit, sonst Grundwert; Obergrenze je Zone (Standard Komfort ± 1/2 K).
 - **Zehrzeit** = Stunden nach Blockende bis zur nächsten Unterschreitung (darüber hinaus aus der Abkühlrate
-  extrapoliert, ≤ 24 h). Unterschreitungen nach der Zehrzeit sind Sache des nächsten Blocks (außer Pause < 2 h).
+  extrapoliert, ≤ 48 h – bei 24 h stießen alle horizontfüllenden Blöcke an den Deckel, alle Startzeiten kosteten
+  gleich und der früheste gewann; „bei Gleichstand der spätere“ wurde verworfen: dann rutschen kurze Blöcke vor eine
+  Lücke, die der nächste Block wegen der Mindestpause nicht mehr schließen kann). Unterschreitungen nach der Zehrzeit sind Sache des nächsten Blocks (außer Pause < 2 h).
   Ohne das sah der Ein-Block-Planer den nächsten Start nie, und der Regler wirkte nicht.
 - Läuft ein Block schon (`running`), kostet Weiterheizen keinen Start (sonst bricht die Neuplanung Blöcke ab).
 - BT-gesteuerte Zonen sind gedeckelt (`charge_cap`): q = 0, sobald die Zone ihre Obergrenze (Ruhezeit: Grundwert) erreicht.
