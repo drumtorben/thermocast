@@ -126,9 +126,12 @@ Live und im Rollout: `charge_cost(w)` („Laden & Zehren“, Spec `docs/superpow
   nächsten Mittag, ein 2-h-Block am Vormittag reichte. Synthetisch: bei milden Tagen weniger Starts *und* Gas.
 - Untergrenze = Komfort − Band in der Komfortzeit, sonst Grundwert; Obergrenze je Zone (Standard Komfort ± 1/2 K).
 - **Zehrzeit** = Stunden nach Blockende bis zur nächsten Unterschreitung (darüber hinaus aus der Abkühlrate
-  extrapoliert, ≤ 48 h – bei 24 h stießen alle horizontfüllenden Blöcke an den Deckel, alle Startzeiten kosteten
-  gleich und der früheste gewann; „bei Gleichstand der spätere“ wurde verworfen: dann rutschen kurze Blöcke vor eine
-  Lücke, die der nächste Block wegen der Mindestpause nicht mehr schließen kann). Unterschreitungen nach der Zehrzeit sind Sache des nächsten Blocks (außer Pause < 2 h).
+  extrapoliert, ≤ 48 h). Auch 48 h erreicht ein langsam auskühlendes Wohnzimmer → alle Startzeiten kosten exakt
+  gleich. **Gleichstand** (`_rank`): unter Blöcken, die bis Horizontende nichts übrig lassen (`covers`), gewinnt
+  der spätere Start (v0.7.8; vorher 5 h Vorlauf für einen Bedarf, den 2 h ab 10 Uhr deckten); sonst bleibt die
+  Suchreihenfolge (früh) – „später“ für Blöcke, die eine Unterschreitung an den nächsten Block weiterreichen, legte
+  bei −10 °C den Block so spät, dass der nächste wegen der Mindestpause zu spät kam (1 K drunter).
+  Unterschreitungen nach der Zehrzeit sind Sache des nächsten Blocks (außer Pause < 2 h).
   Ohne das sah der Ein-Block-Planer den nächsten Start nie, und der Regler wirkte nicht.
 - Läuft ein Block schon (`running`), kostet Weiterheizen keinen Start (sonst bricht die Neuplanung Blöcke ab).
 - BT-gesteuerte Zonen sind gedeckelt (`charge_cap`): q = 0, sobald die Zone ihre Obergrenze (Ruhezeit: Grundwert) erreicht.

@@ -115,6 +115,15 @@ class ScoredCandidate:
     parts: dict[str, float]
     violation: float  # K·h below comfort (leading zones, lower bound)
     preds: dict[str, Prediction]  # leading zones with this candidate
+    covers: bool = False  # a block that leaves no violation inside the horizon after it (nothing for a next block)
+
+
+def _rank(s: ScoredCandidate) -> tuple[float, int]:
+    """Cheapest first. On a tie, among blocks that cover the rest of the horizon the later start wins (the heat
+    is not lost before it is needed) – typically when every candidate's coast reaches the cap. Other ties keep
+    the search order (early first): a short block before a violation it leaves to the next block would, the
+    later it starts, leave that next block no time."""
+    return round(s.cost, 6), -(s.candidate.start or 0) if s.covers else 0
 
 
 @dataclass
@@ -318,14 +327,13 @@ def plan(
             if zz.name in bounded_names:
                 overheat += overheat_kh(pred, zz.comfort_high)
         violation, coast = _counted(viol, cand, horizon, coast_mode)
-        if coast_mode and cand.start is not None and not any(i >= cand.start + cand.length for i, _ in viol):
+        covers = cand.start is not None and not any(i >= cand.start + cand.length for i, _ in viol)
+        if coast_mode and covers:
             coast += _coast_beyond(preds, leading, z)  # no next block needed inside the horizon
         parts = cost_fn(cand, violation, overheat, coast, closed)
-        scored_all.append(ScoredCandidate(cand, sum(parts.values()), parts, violation, preds))
+        scored_all.append(ScoredCandidate(cand, sum(parts.values()), parts, violation, preds, covers=covers))
 
-    # stable: ties keep search order (early starts first). Not "later wins on a tie": with violations left to
-    # the next block, every short block before the gap ties, and the latest one leaves the next block no time
-    ranked = sorted(scored_all, key=lambda s: s.cost)
+    ranked = sorted(scored_all, key=_rank)  # stable
     best = ranked[0]
     planned: dict[str, Prediction] = {}
     for zz in zones:

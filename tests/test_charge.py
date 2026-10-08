@@ -175,6 +175,22 @@ def test_coast_beyond_the_horizon_does_not_saturate_at_a_day():
     assert 24.0 < a < b <= 48.0
 
 
+def test_ties_go_to_the_later_start_only_for_blocks_that_cover_the_horizon():
+    """Real case: blocks 07, 08, 09 and 10 h all cost exactly the same (coast capped) – the earliest won and the
+    living room was charged 5 h ahead of a need a 2-h block at 10 covered. Blocks that leave a violation to a
+    next block keep the early order (cold case: the latest such block left the next one no time)."""
+    from core.planner import ScoredCandidate, _rank
+
+    def sc(start: int | None, covers: bool, cost: float = 10.0) -> ScoredCandidate:
+        return ScoredCandidate(Candidate(start, 2 if start is not None else 0), cost, {}, 0.0, {}, covers=covers)
+
+    covering = sorted([sc(7, True), sc(8, True), sc(10, True), sc(9, True)], key=_rank)
+    assert [s.candidate.start for s in covering] == [10, 9, 8, 7]
+    passing_on = sorted([sc(2, False), sc(5, False), sc(3, False)], key=_rank)
+    assert [s.candidate.start for s in passing_on] == [2, 5, 3]  # search order kept
+    assert min([sc(10, True, 10.5), sc(7, True)], key=_rank).candidate.start == 7  # cost still first
+
+
 def test_late_block_wins_when_the_heat_is_needed_late():
     """Nothing needed for 14 h: charging now buys no pause the house would not have had anyway – the planner
     waits and charges shortly before the need (less heat lost on the way)."""
