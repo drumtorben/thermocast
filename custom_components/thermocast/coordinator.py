@@ -69,7 +69,7 @@ from .const import (
     UPDATE_INTERVAL,
 )
 from .core.forecast import Forecast, fetch_forecast
-from .core.model import HourRecord, OnlineZoneModel, SurfaceSpec, ZoneSpec
+from .core.model import HourRecord, OnlineZoneModel, SurfaceSpec, ZoneSpec, update_q_on
 from .core.planner import PlanResult, ZonePlanInput, charge_cost, plan
 from .core.quality import ForecastLog, RingLog, calibration, measured_by_hour, param_snapshot, std_scale_profile
 from .core.rollout import block_lengths_for
@@ -168,7 +168,7 @@ class ZoneRuntime:
     window_closed: datetime | None = None  # last close: the air recovers from the walls for a while
 
     def reset_acc(self) -> None:
-        self.acc = {"t_out": [], "q": [], "neighbors": [], "gains": [], "window": []}
+        self.acc = {"t_out": [], "q": [], "neighbors": [], "gains": [], "window": [], "pump": []}
 
 
 @dataclass
@@ -671,6 +671,9 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
                     q *= valve if valve is not None else 0.0
             z.acc["t_out"].append(t_out)
             z.acc["q"].append(q)
+            # pump running (space heating): which hours are block hours for q_on; None = no pump entity
+            pump = None if heating is None or not data.get(CONF_HEATING_ACTIVE) else float(heating)
+            z.acc.setdefault("pump", []).append(pump)
             z.acc["neighbors"].append([_num(hass, e) for e in z.cfg.get(CONF_NEIGHBOR_SENSORS, [])])
             z.acc["gains"].append([_or(_num(hass, e), 0.0) for e in z.cfg.get(CONF_GAIN_ENTITIES, [])])
             # aired since the last sample, open now or still recovering: the hour is not learned
@@ -770,8 +773,9 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
             valid=valid,
         )
         err = z.model.update(rec, temp_now)
-        if q > 1.0:  # learn the typical heating proxy during blocks
-            z.q_on = 0.95 * z.q_on + 0.05 * q
+        pumps = acc.get("pump", [])
+        pump_share = _mean(pumps) if pumps and all(p is not None for p in pumps) else None
+        z.q_on = update_q_on(z.q_on, q, pump_share)  # the typical heating proxy of a block hour
         if z.pending_hour is not None:
             z.log.append(
                 {"t": z.pending_hour.isoformat(), "rec": rec.to_dict(), "temp_next": temp_now, "err": err}

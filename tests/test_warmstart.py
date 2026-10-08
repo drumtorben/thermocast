@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -66,6 +67,30 @@ def test_warm_train_learns_a_useful_model_and_rebuilds_logs():
     assert res.q_on is not None and 5 < res.q_on < 20
     hc = hindcast(res.model, res.log, TZ)
     assert hindcast_metrics(res.log, hc, since=None)["mae"] < 0.6
+
+
+def test_q_on_follows_recent_full_pump_hours():
+    """Real case: weeks of always-on pump with a low flow (q ≈ 3), then blocks (q ≈ 15). The planner must
+    plan with the block value, not the mean of every hour with some heat."""
+    from core.model import BLOCK_PUMP_SHARE, block_q, update_q_on
+
+    assert block_q(12.0, 1.0) == 12.0
+    assert block_q(6.0, 0.8) == 7.5  # normalised to the pump time
+    assert block_q(3.0, BLOCK_PUMP_SHARE - 0.05) is None  # overrun, block starting mid-hour
+    assert block_q(0.0, 1.0) is None
+    assert block_q(3.0, None) == 3.0 and block_q(0.5, None) is None  # no pump entity: q > 1 as before
+    assert update_q_on(None, 3.0, 0.5) is None and update_q_on(None, 15.0, 1.0) == 15.0
+
+    sim = simulate(days=3, seed=1)
+    n = 60
+    recs = build_records(_inputs(sim, n), ["90_90", "40_180"])
+    old = [replace(rec, q=3.0) for _, rec, _ in recs[:48]]  # before: pump on all day, low flow
+    new = [replace(rec, q=15.0) for _, rec, _ in recs[48:]]  # now: a few block hours …
+    shares = [1.0] * 48 + [1.0, 1.0, 1.0, 0.3, 0.0, 0.0] * 2  # … plus overrun and pauses
+    records = [(t, rec, nxt) for (t, _, nxt), rec in zip(recs, old + new)]
+    res = warm_train(OnlineZoneModel(SPEC), records, TZ, pump_share=shares)
+    assert res.q_on is not None and res.q_on > 9.0  # mean of all hours with q > 1 would be ≈ 5
+    assert res.q_on < 15.0  # still blended with the older hours
 
 
 def test_without_pump_entity_flow_means_heating():

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
+from functools import partial
 from statistics import fmean
 from typing import TYPE_CHECKING
 
@@ -135,7 +136,7 @@ async def async_warmstart(coordinator: ThermocastCoordinator, only_fresh: bool) 
         )
         records = build_records(inp, keys)
         fresh = OnlineZoneModel(z.model.spec, forgetting=forgetting)
-        res = await hass.async_add_executor_job(warm_train, fresh, records, tz)
+        res = await hass.async_add_executor_job(partial(warm_train, fresh, records, tz, pump_share=heating))
         valid = sum(1 for _, rec, _ in records if rec.valid)
         if valid < MIN_LEARNED_HOURS:
             _LOGGER.info("Thermocast warm start: zone %s has only %s usable hours – skipped", z.title, valid)

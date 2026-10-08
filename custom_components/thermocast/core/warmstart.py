@@ -9,10 +9,9 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from datetime import datetime, tzinfo
-from statistics import fmean
 from typing import Any
 
-from .model import HourRecord, OnlineZoneModel
+from .model import HourRecord, OnlineZoneModel, update_q_on
 from .quality import param_snapshot
 
 
@@ -92,15 +91,20 @@ def warm_train(
     tz: tzinfo,
     log_hours: int = 14 * 24,
     param_days: int = 30,
+    pump_share: list[float | None] | None = None,
 ) -> WarmstartResult:
-    """Run the RLS over the records (in place on ``model``) and rebuild log + parameter history."""
+    """Run the RLS over the records (in place on ``model``) and rebuild log + parameter history.
+
+    ``pump_share`` (aligned to ``records``, share of the hour the heating pump ran; None = not configured)
+    decides which hours count as block hours for ``q_on`` – the same rule as the live loop, in time order, so
+    the most recent blocks dominate."""
     log: list[dict[str, Any]] = []
     params: list[dict[str, Any]] = []
-    qs: list[float] = []
-    for t, rec, nxt in records:
+    q_on: float | None = None
+    for i, (t, rec, nxt) in enumerate(records):
         err = model.update(rec, nxt)
-        if rec.q > 1.0:
-            qs.append(rec.q)
+        share = None if pump_share is None else ((pump_share[i] if i < len(pump_share) else None) or 0.0)
+        q_on = update_q_on(q_on, rec.q, share)
         rec_dict = rec.to_dict()
         rec_dict["temp"] = rec.temp if math.isfinite(rec.temp) else None
         rec_dict["t_out"] = rec.t_out if math.isfinite(rec.t_out) else None
@@ -114,6 +118,6 @@ def warm_train(
         model=model,
         log=log[-log_hours:],
         params=params[-param_days:],
-        q_on=fmean(qs) if qs else None,
+        q_on=q_on,
         learned=model.n_updates,
     )

@@ -94,7 +94,9 @@ Variant A degrades gracefully and makes sure a planned block really heats on mil
 During a block, zones may warm up to their **upper bound** (default comfort + 1 K); afterwards they live off the
 stored heat down to the lower bound (comfort − band during comfort time, otherwise the **base temperature**,
 default comfort − 2 K). The **"Few burner starts ↔ little gas"** slider (options, default 80) weighs starts against
-block hours – both per day, so a longer charge that buys a long pause pays off. Hours in which the thermostat
+block hours – both per day, counted from now until heat is needed again: a longer charge that buys a long pause
+pays off, and a block runs as late as it can (heat stored early is partly lost before it is needed). How much heat
+a block hour brings is learned from real block hours only (pump running almost the whole hour). Hours in which the thermostat
 rooms are closed (at their limit or in quiet time) count as extra starts, so blocks land where many rooms take
 heat at once. Optionally Thermocast sets each zone's **Better Thermostat** target (upper bound in a block, lower
 bound otherwise), with **quiet times** (fixed and/or a `schedule` helper) without valve noise, and it respects

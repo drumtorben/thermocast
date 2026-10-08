@@ -120,6 +120,33 @@ class HourRecord:
         )
 
 
+BLOCK_PUMP_SHARE = 0.75  # an hour is a block hour when the heating pump ran at least this share of it
+Q_ON_ALPHA = 0.2  # q_on follows the last ~5 block hours (a changed heating curve shows after one or two blocks)
+
+
+def block_q(q: float, pump_share: float | None) -> float | None:
+    """Heating proxy of a full block hour from an hour's mean ``q``, None if the hour was no block hour.
+
+    Only hours in which the pump ran (almost) the whole hour count, normalised to the pump time: short pump
+    runs (overrun, a block starting mid-hour) would make the planner underestimate a block several times
+    over. Without a pump signal (``None``) hours with q > 1 count, as before.
+    """
+    if pump_share is None:
+        return q if q > 1.0 else None
+    if pump_share < BLOCK_PUMP_SHARE or q <= 0.0:
+        return None
+    return q / pump_share
+
+
+def update_q_on(q_on: float | None, q: float, pump_share: float | None) -> float | None:
+    """``q_on`` (typical heating proxy while a block runs, what the planner assumes) after one more hour:
+    follows the recent block hours, so the old always-on low-flow operation fades after a block or two."""
+    b = block_q(q, pump_share) if math.isfinite(q) else None
+    if b is None:
+        return q_on
+    return b if q_on is None else (1.0 - Q_ON_ALPHA) * q_on + Q_ON_ALPHA * b
+
+
 @dataclass
 class Prediction:
     mean: list[float]

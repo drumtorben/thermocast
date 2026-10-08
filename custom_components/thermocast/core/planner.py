@@ -155,8 +155,11 @@ def default_cost(
 def charge_cost(weight: float) -> CostFn:
     """Charge and coast: ``weight`` 0 = little gas (short blocks), 1 = few burner starts (long blocks).
 
-    A start costs 1…10, a block hour 0.5…0.15 – both **per day**: scaled by 24 h / (block + coast), so a
-    block that stores enough heat for a long pause pays for itself. Staying below the lower bound costs
+    A start costs 1…10, a block hour 0.5…0.15 – both **per day**: scaled by 24 h / (hours from now until the
+    next block is needed = start + block + coast), so a block that stores enough heat for a long pause pays for
+    itself. Counted from now, not from the block start: an early block buys no pause the house would have had
+    anyway – with the same next need the later block wins, and a later block usually lasts longer (the heat is
+    not lost before it is needed). Staying below the lower bound costs
     20 per K·h (leading zones), going above the upper bound 4 per K·h (all zones). Block hours in which the
     thermostat-controlled rooms are closed (at their cap, e.g. in quiet time) cost extra burner starts: few
     consumers make the boiler cycle inside the block. Marked with ``coast = True``: the planner leaves
@@ -170,11 +173,10 @@ def charge_cost(weight: float) -> CostFn:
         parts = {"comfort": 20.0 * comfort_violation, "overheat": 4.0 * overheat, "start": 0.0, "cycling": 0.0,
                  "energy": 0.0, "delay": 0.0}
         if candidate.start is not None:
-            per_day = 24.0 / max(1.0, candidate.length + coast_h)
+            per_day = 24.0 / max(1.0, candidate.start + candidate.length + coast_h)
             parts["start"] = 0.0 if candidate.continues else (1.0 + 9.0 * w) * per_day
             parts["cycling"] = (1.0 + 9.0 * w) * per_day * CYCLE_STARTS_PER_H * closed_h
             parts["energy"] = (0.5 - 0.35 * w) * candidate.length * per_day
-            parts["delay"] = 0.01 * candidate.start
         return parts
 
     cost.coast = True  # type: ignore[attr-defined]

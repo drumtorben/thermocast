@@ -85,8 +85,10 @@ Ein überdimensionierter Kessel taktet, wenn er öfter kurz anspringt. Thermocas
 Blöcke: während eines Blocks dürfen die Zonen bis zu ihrer **Obergrenze** warm werden (Standard Komfort + 1 K),
 danach zehren sie von der gespeicherten Wärme bis zur Untergrenze (in der Komfortzeit Komfort − Band, sonst der
 **Grundwert**, Standard Komfort − 2 K). Der Regler **„Wenige Brennerstarts ↔ wenig Gas“** (Optionen, Standard 80)
-gewichtet Starts gegen Blockstunden – beide pro Tag gerechnet, so dass eine längere Ladung, die eine lange Pause
-ermöglicht, sich lohnt. Stunden, in denen die Thermostat-Räume zu sind (an ihrer Grenze oder in der Ruhezeit),
+gewichtet Starts gegen Blockstunden – beide pro Tag gerechnet, ab jetzt bis zum nächsten Wärmebedarf: Eine längere
+Ladung, die eine lange Pause ermöglicht, lohnt sich, und ein Block läuft so spät wie möglich (früh gespeicherte Wärme
+geht bis zum Bedarf teils verloren). Wie viel Wärme eine Blockstunde bringt, lernt Thermocast nur aus echten
+Blockstunden (Pumpe lief fast die ganze Stunde). Stunden, in denen die Thermostat-Räume zu sind (an ihrer Grenze oder in der Ruhezeit),
 zählen als zusätzliche Starts – Blöcke landen bevorzugt dort, wo viele Räume gleichzeitig Wärme abnehmen.
 Optional setzt Thermocast je Zone den Sollwert von **Better Thermostat** (im Block die Obergrenze, sonst die
 Untergrenze), mit **Ruhezeiten** (fest und/oder `schedule`-Helfer) ohne Stellgeräusche und Respekt vor Handeingriffen.

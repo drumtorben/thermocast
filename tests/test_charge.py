@@ -60,11 +60,12 @@ def test_no_cap_keeps_the_old_block_inputs():
 
 
 def test_charge_cost_parts():
-    parts = charge_cost(0.8)(Candidate(1, 4), 0.5, 0.25, 20.0)  # 4 h block + 20 h coast = one start per day
+    # next need 24 h from now (1 h wait + 4 h block + 19 h coast) = one start per day
+    parts = charge_cost(0.8)(Candidate(1, 4), 0.5, 0.25, 19.0)
     assert parts["comfort"] == 10.0 and parts["overheat"] == 1.0
     assert abs(parts["start"] - 8.2) < 1e-9 and abs(parts["energy"] - 4 * 0.22) < 1e-9
-    assert parts["delay"] == 0.01
-    half = charge_cost(0.8)(Candidate(1, 4), 0.0, 0.0, 8.0)  # 12 h cycle = two starts per day
+    assert parts["delay"] == 0.0  # a late start is rewarded by the per-day scaling itself
+    half = charge_cost(0.8)(Candidate(1, 4), 0.0, 0.0, 7.0)  # next need in 12 h = two starts per day
     assert abs(half["start"] - 16.4) < 1e-9
     assert charge_cost(0.0)(Candidate(None), 0.0, 0.0, 0.0) == {
         "comfort": 0.0, "overheat": 0.0, "start": 0.0, "cycling": 0.0, "energy": 0.0, "delay": 0.0,
@@ -74,9 +75,9 @@ def test_charge_cost_parts():
 
 def test_charge_cost_prices_closed_consumers_as_extra_starts():
     # one block hour with every thermostat-controlled room closed ≈ 60/45 extra burner starts (Taktsperre)
-    parts = charge_cost(0.8)(Candidate(1, 4), 0.0, 0.0, 20.0, 1.5)  # per_day = 1
+    parts = charge_cost(0.8)(Candidate(1, 4), 0.0, 0.0, 19.0, 1.5)  # per_day = 1
     assert abs(parts["cycling"] - 8.2 * CYCLE_STARTS_PER_H * 1.5) < 1e-9
-    assert charge_cost(0.8)(Candidate(1, 4), 0.0, 0.0, 20.0)["cycling"] == 0.0
+    assert charge_cost(0.8)(Candidate(1, 4), 0.0, 0.0, 19.0)["cycling"] == 0.0
     assert charge_cost(0.8)(Candidate(None), 0.0, 0.0, 0.0, 0.0)["cycling"] == 0.0
     assert default_cost(Candidate(1, 4), 0.5, 0.25, 9.0, 2.0) == default_cost(Candidate(1, 4), 0.5)
 
@@ -135,8 +136,8 @@ def test_overheat_is_measured_for_every_zone():
     assert long.parts["overheat"] > 0
 
 
-def _blocks(weight: float):
-    zone = _zone(t_out=3.0, temp=20.3, high=22.0)
+def _blocks(weight: float, t_out: float = -5.0):
+    zone = _zone(t_out=t_out, temp=20.3, high=22.0)
     ro = rollout([zone], 48, RULES, ActuatorState(on=False), cost_fn=charge_cost(weight), z=0.0)
     lengths = [e - s for s, e in ro.blocks]
     comfort_dip = max(
@@ -151,6 +152,24 @@ def test_starts_weight_gives_fewer_longer_blocks():
     assert n_starts <= 4  # two days: at most two starts per day
     assert n_starts < n_energy and len_starts > len_energy
     assert dip < 0.15  # the comfort bound still holds (expected path, z = 0)
+
+
+def test_mild_weather_needs_few_blocks_whatever_the_weight():
+    """Counting the pause from now: no frequent short blocks at the upper bound, not even for 'little gas'."""
+    for weight in (0.0, 0.8):
+        n, _, dip = _blocks(weight, t_out=10.0)
+        assert n <= 2 and dip < 0.15
+
+
+def test_late_block_wins_when_the_heat_is_needed_late():
+    """Nothing needed for 14 h: charging now buys no pause the house would not have had anyway – the planner
+    waits and charges shortly before the need (less heat lost on the way)."""
+    lead = _zone(t_out=3.0, temp=21.0, hours=24, high=22.0)
+    lead = type(lead)(**{**lead.__dict__, "comfort_low": [None] * 14 + [20.8] * 10})
+    res = plan([lead], cost_fn=charge_cost(0.8), z=0.0)
+    assert res.best.start is not None and res.best.start >= 6  # counted from the block start it was 4
+    now = next(s for s in res.ranked if s.candidate.start == 0 and s.violation == 0.0)
+    assert now.cost > res.cost
 
 
 def test_running_block_is_continued_without_a_new_start():

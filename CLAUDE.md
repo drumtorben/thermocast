@@ -105,6 +105,10 @@ T[t+1] − T[t] = b0 + a·(T_out − T)
 - `Q` (Heiz-Proxy): `max(0, Vorlauf − T_raum)` solange Heizungspumpe läuft und keine WW-Ladung (Option);
   Heizkörper × Ventilanteil – bevorzugt `hvac_action` des TRV-Thermostats (heating/idle), denn der TRVZB
   meldet keine echte Ventilstellung (`valve_opening_degree` ist nur eine Grenze).
+- `q_on` (Heiz-Proxy, den der Planer je Blockstunde annimmt): EMA (α 0,2) nur über Stunden mit Pumpe ≥ 75 % der
+  Stunde, auf die Pumpenzeit normiert (`block_q`/`update_q_on`), live und im Warmstart (zeitlich geordnet).
+  Vorher Mittel aller Stunden mit q > 1 → im Warmstart dominierte der alte Dauerbetrieb mit wenig Vorlauf
+  (WZ 3,2 statt ~15 in Blöcken) und der Planer unterschätzte Blöcke um Faktor 4–5.
 - RLS: Vergessensfaktor 0,996/h (~10 Tage), Vorzeichen-Projektion (alles außer Bias ≥ 0),
   Huber-Clipping (3σ), Kovarianz-Deckel (normierte Spur ≤ 50) gegen Wind-up im Sommer.
   Stunden mit offenem Fenster/Datenlücke: nicht lernen, nur Historie fortschreiben.
@@ -114,7 +118,11 @@ T[t+1] − T[t] = b0 + a·(T_out − T)
 
 Live und im Rollout: `charge_cost(w)` („Laden & Zehren“, Spec `docs/superpowers/specs/2026-10-06-charge-and-coast-design.md`),
 `w` = Option „Wenige Brennerstarts ↔ wenig Gas“ / 100 (Standard 0,8):
-`20·K·h unter Untergrenze (führende Zonen) + 4·K·h über Obergrenze (alle) + [(1+9w) + (0,5−0,35w)·Länge]·24/(Länge+Zehrzeit) + 0,01·Start`.
+`20·K·h unter Untergrenze (führende Zonen) + 4·K·h über Obergrenze (alle) + [(1+9w) + (0,5−0,35w)·Länge]·24/(Start+Länge+Zehrzeit)`.
+- **Pro Tag ab jetzt** (v0.7.4): Nenner = Stunden *ab jetzt* bis zum nächsten Bedarf, nicht ab Blockbeginn – ein früher
+  Block kauft keine Pause, die das Haus ohnehin hatte; bei gleichem nächsten Bedarf gewinnt der spätere Block (die
+  alte Strafe `0,01·Start` bevorzugte frühe Starts, trotz Kommentar). Anlass: Block 17–21 Uhr für den Bedarf am
+  nächsten Mittag, ein 2-h-Block am Vormittag reichte. Synthetisch: bei milden Tagen weniger Starts *und* Gas.
 - Untergrenze = Komfort − Band in der Komfortzeit, sonst Grundwert; Obergrenze je Zone (Standard Komfort ± 1/2 K).
 - **Zehrzeit** = Stunden nach Blockende bis zur nächsten Unterschreitung (darüber hinaus aus der Abkühlrate
   extrapoliert, ≤ 24 h). Unterschreitungen nach der Zehrzeit sind Sache des nächsten Blocks (außer Pause < 2 h).
@@ -122,7 +130,7 @@ Live und im Rollout: `charge_cost(w)` („Laden & Zehren“, Spec `docs/superpow
 - Läuft ein Block schon (`running`), kostet Weiterheizen keinen Start (sonst bricht die Neuplanung Blöcke ab).
 - BT-gesteuerte Zonen sind gedeckelt (`charge_cap`): q = 0, sobald die Zone ihre Obergrenze (Ruhezeit: Grundwert) erreicht.
 - **Wenig Abnehmer** (`cycling`): Blockstunden, in denen BT-Räume zu sind (Anteil an allen BT-Räumen), kosten
-  `(1+9w)·24/(Länge+Zehrzeit)·60/45` je Stunde – mit wenigen offenen Kreisen taktet der Brenner im Block
+  `(1+9w)·24/(Start+Länge+Zehrzeit)·60/45` je Stunde – mit wenigen offenen Kreisen taktet der Brenner im Block
   (Taktsperre 45 min). Legt Blöcke in Stunden, in denen viele Räume Wärme nehmen (z. B. vor einer Ruhezeit).
 `default_cost` (alt, ohne Obergrenze/Zehrzeit) bleibt für Tests/Vergleich. Die Kostenfunktion ist injizierbar –
 für die Wärmepumpe später COP(T_out, Vorlauf), Strompreis, PV-Überschuss.
