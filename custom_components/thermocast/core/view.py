@@ -207,6 +207,19 @@ def _candidates(outlook: Outlook, n: int, now: int, iso) -> list[dict[str, Any]]
     return out
 
 
+def _rollout_covers(explanation: dict[str, Any], outlook: Outlook, start: int, now: int, iso) -> bool:
+    """The rollout's first block starts before the driver's first violation and keeps it above its bound there."""
+    if not explanation.get("first_violation") or not explanation.get("driver"):
+        return False
+    i = round((datetime.fromisoformat(explanation["first_violation"]) - datetime.fromisoformat(iso(now))) / HOUR) - 1
+    zone = next((zi for zi in outlook.first_inputs if zi.name == explanation["driver"]), None)
+    traj = outlook.rollout.zones.get(explanation["driver"])
+    if zone is None or traj is None or not 0 <= i < min(len(traj.mean), len(zone.comfort_low)) or start > i:
+        return False
+    bound = zone.comfort_low[i]
+    return bound is None or traj.mean[i] >= bound - 0.01
+
+
 def _next_block_from_rollout(explanation: dict[str, Any], outlook: Outlook, now: int, iso) -> dict[str, Any]:
     """The story shows the block the controller will actually run (rollout), not the planner's
     single-block candidate – the rollout re-plans hourly and may stop earlier or split the block."""
@@ -218,6 +231,10 @@ def _next_block_from_rollout(explanation: dict[str, Any], outlook: Outlook, now:
         return out
     start, end = blocks[0]
     out["next_block"] = {"start": iso(now + start), "end": iso(now + end)}
+    if out.get("code") == "violation_accepted" and _rollout_covers(out, outlook, start, now, iso):
+        # the planner looks 24 h ahead and saw only the first hours of the need – not worth a block yet; the
+        # rollout (re-planning hourly, seeing more of it) does run one in time: that is the story
+        out["code"] = "block_planned"
     if out.get("code") in ("heating_now", "block_planned"):
         out["code"] = "heating_now" if start == 0 else "block_planned"
         if out.get("first_violation"):

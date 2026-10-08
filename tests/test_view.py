@@ -114,6 +114,34 @@ def test_story_block_is_the_rollout_block():
     assert ex["code"] == ("heating_now" if first["start"] == v["hours"][v["window"]["now_index"]] else "block_planned")
 
 
+def _accepted_story(rollout_mean_at_violation: float) -> dict:
+    """The planner (24 h ahead) accepts a small violation at hour 11; the rollout runs a block from hour 5."""
+    from core.planner import Candidate, PlanResult
+    from core.rollout import RolloutResult, ZoneTrajectory
+    from core.view import Outlook, _next_block_from_rollout
+
+    h0 = datetime(2026, 10, 8, 11, tzinfo=UTC)
+    zone = ZonePlanInput(name="wz", model=trained_model(), temp_now=21.3, future=future(10.0, 24),
+                         comfort_low=[None] * 10 + [21.2] * 14)
+    mean = [21.3] * 24
+    mean[10] = rollout_mean_at_violation
+    ro = RolloutResult(first=PlanResult(best=Candidate(None), cost=0.0), on=[False] * 5 + [True] * 2 + [False] * 17,
+                       zones={"wz": ZoneTrajectory(temp0=21.3, mean=mean)})
+    explanation = {"code": "violation_accepted", "driver": "wz", "first_violation": (h0 + timedelta(hours=11)).isoformat(),
+                   "deficit_k": 0.24, "next_block": None, "lead_h": None}
+    return _next_block_from_rollout(explanation, Outlook(ro, [zone], explanation, {}), 0,
+                                    lambda i: (h0 + timedelta(hours=i)).isoformat())
+
+
+def test_story_accepted_violation_that_the_rollout_prevents_is_a_planned_block():
+    """Real case: "Wohnzimmer drops slightly below comfort at 12:00, a block would cost more" – next to a planned
+    block that keeps it above. The single-block plan saw only the first hour of the need; the rollout covers it."""
+    ex = _accepted_story(21.45)
+    assert ex["code"] == "block_planned" and ex["lead_h"] == 6
+    assert ex["next_block"]["start"] == datetime(2026, 10, 8, 16, tzinfo=UTC).isoformat()
+    assert _accepted_story(21.1)["code"] == "violation_accepted"  # the rollout accepts it too: the text is right
+
+
 def test_past_causes_forecast6_and_dhw():
     w = make_window(NOW, TZ, "Europe/Berlin")
     n, now = len(w.hours), w.now_index
