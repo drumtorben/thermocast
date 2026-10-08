@@ -556,7 +556,6 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
             held, self.warmstart_pending = self.warmstart_pending, False
         if any(result.values()):
             await self.async_save()
-            self.view_builder.invalidate()
         if any(result.values()) or held:
             # plan with the learned model (and end the hold) – directly: a debounced request would delay
             # the next requested refresh (e.g. switching control on right after the setup)

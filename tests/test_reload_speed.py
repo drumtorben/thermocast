@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import timedelta
 from unittest.mock import patch
 
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
+from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
 from custom_components.thermocast.const import CONF_SURFACES
 
@@ -38,6 +40,53 @@ async def test_setup_does_not_wait_for_the_panel_view(hass: HomeAssistant, mock_
         await hass.async_block_till_done(wait_background_tasks=True)
     assert coordinator.view["version"] == 1
     assert pushed and pushed[-1]["version"] == 1
+
+
+async def test_update_during_a_build_is_built_afterwards(hass: HomeAssistant, mock_entry, mock_open_meteo) -> None:
+    """Regression: a warm start finished while the view of the old models was being built – the panel kept the
+    old plan until the next hour. Every update now gets its own build (the latest one, after the running one)."""
+    from custom_components.thermocast.view_builder import ViewBuilder
+
+    await _setup_states(hass)
+    await _setup_entry(hass, mock_entry)
+    coordinator = mock_entry.runtime_data
+    gate = asyncio.Event()
+    build = ViewBuilder._async_build
+    q_on_seen: list[float] = []
+
+    async def slow_build(self, *args):
+        q_on_seen.append(coordinator.zones["zone_eg"].q_on)
+        await gate.wait()
+        return await build(self, *args)
+
+    with patch.object(ViewBuilder, "_async_build", slow_build):
+        await coordinator.async_refresh()  # build 1 starts (old model) and waits
+        await hass.async_block_till_done()
+        coordinator.zones["zone_eg"].q_on = 15.0  # e.g. a warm start replaced the models
+        await coordinator.async_refresh()  # arrives during build 1
+        await coordinator.async_refresh()  # … and another one: only the latest is built
+        gate.set()
+        await hass.async_block_till_done(wait_background_tasks=True)
+    assert len(q_on_seen) == 2 and q_on_seen[-1] == 15.0
+
+
+async def test_forecast_log_keeps_the_first_plan_of_the_hour(
+    hass: HomeAssistant, mock_entry, mock_open_meteo, freezer
+) -> None:
+    """Rebuilding every 15 min must not turn the logged '1 h ahead' forecast into a 15-min one."""
+    freezer.move_to("2026-10-08 10:01:00+00:00")
+    mock_open_meteo(5.0)
+    await _setup_states(hass)
+    await _setup_entry(hass, mock_entry)
+    coordinator = mock_entry.runtime_data
+    flog = coordinator.zones["zone_eg"].flog
+    first = dict(flog.to_dict())
+    assert "2026-10-08T10:00:00+00:00" in first
+    hass.states.async_set("sensor.living", "19.0", {"device_class": "temperature"})  # a different plan at :16
+    freezer.tick(timedelta(minutes=15))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert flog.to_dict()["2026-10-08T10:00:00+00:00"] == first["2026-10-08T10:00:00+00:00"]
 
 
 async def test_unload_during_a_view_build(hass: HomeAssistant, mock_entry, mock_open_meteo) -> None:

@@ -48,8 +48,12 @@ async def test_subscribe_pushes_view(hass: HomeAssistant, mock_entry, mock_open_
     assert first["event"]["view"]["version"] == 1
 
     await mock_entry.runtime_data.async_refresh()
-    pushed = await ws.receive_json()
-    assert pushed["event"]["view"]["version"] == 1
+    await hass.async_block_till_done(wait_background_tasks=True)
+    # every update: the decision right away, then the rebuilt plan
+    decision = await ws.receive_json()
+    rebuilt = await ws.receive_json()
+    assert decision["event"]["view"]["version"] == 1 and rebuilt["event"]["view"]["version"] == 1
+    assert rebuilt["event"]["view"]["generated_at"] >= decision["event"]["view"]["generated_at"]
 
     assert await hass.config_entries.async_unload(mock_entry.entry_id)
     gone = await ws.receive_json()

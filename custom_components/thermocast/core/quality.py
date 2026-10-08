@@ -73,6 +73,9 @@ class ForecastLog:
         while len(self._d) > self._max:
             self._d.pop(next(iter(self._d)))
 
+    def has(self, issue: datetime) -> bool:
+        return issue.isoformat() in self._d
+
     def predicted(self, target: datetime, k: int) -> tuple[float, float] | None:
         entry = self._d.get((target - k * HOUR).isoformat())
         if not entry or str(k) not in entry:

@@ -65,7 +65,6 @@ class ViewBuilder:
     def __init__(self, coordinator: ThermocastCoordinator) -> None:
         self._c = coordinator
         self.view: dict[str, Any] | None = None
-        self._key: tuple | None = None
         self._window_start: datetime | None = None
         self._window_end: datetime | None = None
         self._snapshots: dict[datetime, PlanSnapshot] = {}
@@ -79,7 +78,7 @@ class ViewBuilder:
         # (re)load waits for it; the panel gets the result through these listeners
         self._listeners: list[Callable[[], None]] = []
         self._build_task: asyncio.Task | None = None
-        self._pending: tuple[datetime, ThermocastData, tuple] | None = None
+        self._pending: tuple[datetime, ThermocastData] | None = None
         self._unloaded = False
 
     @property
@@ -110,10 +109,6 @@ class ViewBuilder:
         self.view = {"error": "unloaded"}
         self._notify()  # open panels re-subscribe
 
-    def invalidate(self) -> None:
-        """Force a full rebuild on the next refresh (e.g. after a warm start replaced the models)."""
-        self._key = None
-
     def _update_shadow(self, now: datetime, data: ThermocastData) -> None:
         today = dt_util.as_local(now).date()
         if self._shadow_day != today:
@@ -136,34 +131,27 @@ class ViewBuilder:
 
     @callback
     def async_schedule_refresh(self, now: datetime, data: ThermocastData) -> None:
-        """Rebuild on a new hour / forecast / fail-safe change (in the background), otherwise only refresh
-        decision + events right away. Never raises."""
+        """After every coordinator update: decision + events right away, the full view (rollout, candidates,
+        history) rebuilt in the background – so the panel always shows what the controller just planned
+        (a rebuild takes well under a second since the planner is vectorised). Never raises."""
         if self._unloaded:
             return
         c = self._c
         try:
             self._update_shadow(now, data)
-            hour0 = now.replace(minute=0, second=0, microsecond=0)
-            # zones with a plan belong to the key: right after a start the first view has none yet
-            planned = tuple(sorted(sid for sid, zr in data.zones.items() if zr.times))
-            key = (hour0, c.forecast.fetched_at if c.forecast else None, data.failsafe_reason, planned)
-            if self._is_current(key):
+            if self.view is not None and "error" not in self.view:
                 self._refresh_decision(now, data)
                 self._notify()
-                return
         except Exception as err:
             _LOGGER.exception("Thermocast: refreshing the panel view failed")
             self.view = {"error": f"{type(err).__name__}: {err}"}
             self._notify()
             return
-        self._pending = (now, data, key)
+        self._pending = (now, data)  # updates arriving during a build: only the latest is built afterwards
         if self._build_task is None or self._build_task.done():
             self._build_task = c.config_entry.async_create_background_task(
                 c.hass, self._async_build_pending(), "thermocast_view"
             )
-
-    def _is_current(self, key: tuple) -> bool:
-        return self.view is not None and "error" not in self.view and key == self._key
 
     def _refresh_decision(self, now: datetime, data: ThermocastData) -> None:
         assert self.view is not None
@@ -175,18 +163,15 @@ class ViewBuilder:
         }
 
     async def _async_build_pending(self) -> None:
-        """Build the latest requested view; updates that arrive meanwhile only rebuild when their key differs."""
+        """Build the latest requested view; an update that arrives meanwhile is built right after."""
         while self._pending is not None and not self._unloaded:
-            now, data, key = self._pending
+            now, data = self._pending
             self._pending = None
             try:
-                if self._is_current(key):
-                    self._refresh_decision(now, data)
-                else:
-                    view = await self._async_build(now, now.replace(minute=0, second=0, microsecond=0), data)
-                    if self._unloaded:
-                        return
-                    self.view, self._key = view, key
+                view = await self._async_build(now, now.replace(minute=0, second=0, microsecond=0), data)
+                if self._unloaded:
+                    return
+                self.view = view
             except Exception as err:
                 _LOGGER.exception("Thermocast: building the panel view failed")
                 self.view = {"error": f"{type(err).__name__}: {err}"}
@@ -332,9 +317,10 @@ class ViewBuilder:
                 self._snapshots = {h: s for h, s in self._snapshots.items() if h >= hour0 - HOUR}
                 self._snapshots[hour0] = snap
                 change = plan_change(self._snapshots.get(hour0 - HOUR), snap, {zi.name: zi.temp_now for zi in inputs})
-                # operational forecast log (model tab: forecast quality per horizon)
+                # operational forecast log (model tab: forecast quality per horizon) – the first plan of the hour:
+                # a rebuild at :45 would turn the "1 h ahead" forecast into a 15-min one
                 for zid, tr in outlook.rollout.zones.items():
-                    if zid in c.zones:
+                    if zid in c.zones and not c.zones[zid].flog.has(hour0):
                         c.zones[zid].flog.record(hour0, Prediction(mean=tr.mean, std=tr.std))
 
         # --------------------------------------------------------------- zones

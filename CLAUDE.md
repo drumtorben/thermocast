@@ -201,9 +201,12 @@ Attr. Parameter + Sonnenantwort je Fläche).
   - Im Beobachtungsmodus startet der Rollout vom **Schatten-Aktor** (`ViewBuilder._update_shadow`),
     sonst ignorierte er Mindestblock/-pause.
   - Periodische Coordinator-Refreshes sind Background-Tasks → in Tests
-    `async_block_till_done(wait_background_tasks=True)`. Ebenso der Panel-View: ein Neubau (neue Stunde/Prognose/
-    Fail-safe) läuft als Background-Task (`ViewBuilder.async_schedule_refresh`), Setup/Reload warten nicht darauf;
-    das Panel abonniert `ViewBuilder.async_add_listener`, nicht den Coordinator.
+    `async_block_till_done(wait_background_tasks=True)`. Ebenso der Panel-View: **jedes** Coordinator-Update
+    pusht sofort Entscheidung + Ereignisse und baut den View im Hintergrund neu (`ViewBuilder.async_schedule_refresh`,
+    nur das jüngste wartende Update wird nach einem laufenden Bau gebaut – v0.7.5; vorher nur bei neuer Stunde/
+    Prognose/Fail-safe, und ein Warmstart während eines Baus ging verloren). Prognose-Log nur beim ersten Bau der
+    Stunde (`ForecastLog.has`). Setup/Reload warten nicht darauf; das Panel abonniert
+    `ViewBuilder.async_add_listener`, nicht den Coordinator.
   - Planer: `ZonePlanInput.heating_batch` → `OnlineZoneModel.predict_batch` rechnet alle Kandidaten einer Zone als
     Matrix (Modell linear in T). Muss mit `predict` übereinstimmen (`tests/test_predict_batch.py`).
   - Reload übernimmt die Prognose (< 1 h, alle Flächen-Ausrichtungen enthalten) über `hass.data` (`FORECAST_CACHE`).
