@@ -163,7 +163,8 @@
           "heat_energy_entity": "Heating energy in kWh (optional)",
           "calibrate_sigma": "Calibrate the uncertainty",
           "starts_weight": "Few burner starts ↔ little gas",
-          "anti_cycle_minutes": "Boiler anti-cycling lock"
+          "anti_cycle_minutes": "Boiler anti-cycling lock",
+          "precharge_hours": "Charge before comfort starts"
         },
         "data_description": {
           "forgetting_factor": "0.996 ≈ 10 days memory. Lower adapts faster but is noisier.",
@@ -173,7 +174,8 @@
           "heat_energy_entity": "Total heating energy (kWh, total_increasing), e.g. EMS-ESP energy heating. Used for kWh per heating degree day.",
           "calibrate_sigma": "Widens σ per forecast horizon so that ±σ covers ~68 % of the forecast errors observed in the last 14 days (needs ≥ 48 checks per horizon; never narrows it).",
           "starts_weight": "0 = short blocks, little gas; 100 = few long blocks that charge the rooms up to their upper bound.",
-          "anti_cycle_minutes": "Minimum time between two burner starts as set at the boiler (0 = off). Needs the burner starts sensor: a block then ends just before a restart that would only run a few minutes."
+          "anti_cycle_minutes": "Minimum time between two burner starts as set at the boiler (0 = off). Needs the burner starts sensor: a block then ends just before a restart that would only run a few minutes.",
+          "precharge_hours": "A block charges a thermostat-controlled room up to its upper bound in comfort time and this many hours before it starts; otherwise only to its base temperature (0 = only in comfort time)."
         }
       }
     }

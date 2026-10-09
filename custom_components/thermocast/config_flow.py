@@ -44,6 +44,7 @@ from .const import (
     CONF_MIN_PAUSE_H,
     CONF_NEIGHBOR_SENSORS,
     CONF_OUTDOOR_SENSOR,
+    CONF_PRECHARGE_H,
     CONF_QUIET_FROM,
     CONF_QUIET_SCHEDULE,
     CONF_QUIET_TO,
@@ -64,6 +65,7 @@ from .const import (
     DEFAULT_MAX_SWITCHES,
     DEFAULT_MIN_BLOCK_H,
     DEFAULT_MIN_PAUSE_H,
+    DEFAULT_PRECHARGE_H,
     DEFAULT_STARTS_WEIGHT,
     DOMAIN,
     HEAT_TYPES,
@@ -130,6 +132,9 @@ def _options_schema(options: dict[str, Any]) -> vol.Schema:
             vol.Required(
                 CONF_ANTI_CYCLE_MIN, default=options.get(CONF_ANTI_CYCLE_MIN, DEFAULT_ANTI_CYCLE_MIN)
             ): _number(0, 60, 1, "min"),
+            vol.Required(
+                CONF_PRECHARGE_H, default=options.get(CONF_PRECHARGE_H, DEFAULT_PRECHARGE_H)
+            ): _number(0, 48, 1, "h"),
             # optional sources for the panel (DHW hatching, KPIs) – suggested, so they can be cleared
             vol.Optional(CONF_DHW_ENTITY): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain=["binary_sensor", "switch", "sensor"])

@@ -15,6 +15,7 @@ from custom_components.thermocast.const import (
     CONF_BT_ENTITY,
     CONF_COMFORT_HIGH,
     CONF_HEAT_TYPE,
+    CONF_PRECHARGE_H,
     CONF_QUIET_FROM,
     CONF_QUIET_TO,
     CONF_STARTS_WEIGHT,
@@ -64,7 +65,7 @@ async def test_quiet_hours_over_midnight(hass: HomeAssistant) -> None:
 
 
 async def test_charge_target_outside_comfort(hass: HomeAssistant) -> None:
-    """Outside comfort time a block charges the zone only if comfort starts within PRECHARGE_H, else to the base."""
+    """Outside comfort time a block charges the zone only if comfort starts within precharge_h, else to the base."""
     z = _z(**{CONF_BT_CONTROL: True, CONF_BT_ENTITY: "climate.bt", CONF_COMFORT_HIGH: 22.5, CONF_BASE_TEMP: 17.0})
     assert zone_charge_target(z, _local(hass, 12)) == 22.5  # comfort time
     assert zone_charge_target(z, _local(hass, 2)) == 22.5  # comfort starts at 06:00, in 4 h
@@ -75,6 +76,11 @@ async def test_charge_target_outside_comfort(hass: HomeAssistant) -> None:
     assert zone_charge_cap(z, saturday) == 17.0  # the planner sees the same target
     assert zone_charge_target(z, _local(hass, 7)) == 22.5  # Tuesday morning, comfort in 1 h
     assert zone_charge_target(z, _local(hass, 16)) == 17.0  # next comfort a week away
+    z.precharge_h = 48  # house option: charge two days ahead
+    assert zone_charge_target(z, saturday) == 17.0  # Tuesday 08:00 is still 70 h away
+    assert zone_charge_target(z, saturday + timedelta(days=1)) == 22.5  # Sunday 10:00, comfort in 46 h
+    z.precharge_h = 0  # only in comfort time
+    assert zone_charge_target(z, _local(hass, 7)) == 17.0 and zone_charge_target(z, _local(hass, 8)) == 22.5
 
 
 async def test_open_window_neither_leads_nor_takes_heat(hass: HomeAssistant) -> None:
@@ -173,10 +179,14 @@ async def test_starts_weight_option(hass: HomeAssistant, mock_entry: MockConfigE
     result = await hass.config_entries.options.async_init(mock_entry.entry_id)
     keys = {str(k): k for k in result["data_schema"].schema}
     assert keys[CONF_STARTS_WEIGHT].default() == 80
+    assert keys[CONF_PRECHARGE_H].default() == 12
     opts = {CONF_MIN_BLOCK_H: 3, CONF_MIN_PAUSE_H: 2, CONF_MAX_SWITCHES: 12, CONF_FORGETTING: 0.996,
-            CONF_CONFIDENCE_Z: 1.0, CONF_STARTS_WEIGHT: 50}
+            CONF_CONFIDENCE_Z: 1.0, CONF_STARTS_WEIGHT: 50, CONF_PRECHARGE_H: 24}
     await hass.config_entries.options.async_configure(result["flow_id"], opts)
-    assert mock_entry.options[CONF_STARTS_WEIGHT] == 50
+    assert mock_entry.options[CONF_STARTS_WEIGHT] == 50 and mock_entry.options[CONF_PRECHARGE_H] == 24
+    assert await hass.config_entries.async_setup(mock_entry.entry_id)
+    await hass.async_block_till_done()
+    assert {z.precharge_h for z in mock_entry.runtime_data.zones.values()} == {24}
 
 
 CONF_SURFACES_EMPTY = "surfaces"

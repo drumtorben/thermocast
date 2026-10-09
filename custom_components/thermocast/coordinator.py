@@ -43,6 +43,7 @@ from .const import (
     CONF_MIN_BLOCK_H,
     CONF_NEIGHBOR_SENSORS,
     CONF_OUTDOOR_SENSOR,
+    CONF_PRECHARGE_H,
     CONF_QUIET_FROM,
     CONF_QUIET_SCHEDULE,
     CONF_QUIET_TO,
@@ -58,13 +59,13 @@ from .const import (
     DEFAULT_FORGETTING,
     DEFAULT_HIGH_OFFSET,
     DEFAULT_MIN_BLOCK_H,
+    DEFAULT_PRECHARGE_H,
     DEFAULT_Q_ON,
     DEFAULT_STARTS_WEIGHT,
     DOMAIN,
     FORECAST_MAX_AGE,
     FORECAST_STALE_FAILSAFE,
     HORIZON_HOURS,
-    PRECHARGE_H,
     STORAGE_VERSION,
     SUBENTRY_ZONE,
     UPDATE_INTERVAL,
@@ -162,6 +163,7 @@ class ZoneRuntime:
     std_scale: tuple[float, ...] = ()  # calibrated σ factor per hour ahead (from the forecast log)
     schedule_plan: dict[str, list[dict[str, Any]]] | None = None  # weekly plan of the comfort schedule
     quiet_plan: dict[str, list[dict[str, Any]]] | None = None  # weekly plan of the quiet-time schedule
+    precharge_h: int = DEFAULT_PRECHARGE_H  # house option: charge in a block when comfort starts within this
     # airing (window entities, tracked by state change – a short airing often falls between two updates)
     window_open: bool = False
     window_seen: bool = False  # opened since the last sample
@@ -261,8 +263,8 @@ def zone_quiet(z: ZoneRuntime, when: datetime, lead: timedelta = timedelta(0)) -
 
 def zone_charge_target(z: ZoneRuntime, when: datetime) -> float:
     """How far a block charges the zone: the upper bound in comfort time or when comfort starts within
-    PRECHARGE_H, otherwise only the base temperature (a room nobody uses before next week stays cool)."""
-    if any(zone_comfort(z, when + timedelta(hours=h)) is not None for h in range(PRECHARGE_H + 1)):
+    ``z.precharge_h`` hours, otherwise only the base temperature (a room nobody uses before next week stays cool)."""
+    if any(zone_comfort(z, when + timedelta(hours=h)) is not None for h in range(z.precharge_h + 1)):
         return zone_high(z)
     return zone_base(z)
 
@@ -454,6 +456,7 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
             n_gains=len(cfg.get(CONF_GAIN_ENTITIES, [])),
         )
         zr = ZoneRuntime(sub.subentry_id, sub.title, cfg, OnlineZoneModel(spec, forgetting=forgetting))
+        zr.precharge_h = int(self.config_entry.options.get(CONF_PRECHARGE_H, DEFAULT_PRECHARGE_H))
         zr.reset_acc()
         return zr
 
