@@ -264,17 +264,18 @@ def zone_quiet(z: ZoneRuntime, when: datetime, lead: timedelta = timedelta(0)) -
 
 def zone_charge_target(z: ZoneRuntime, when: datetime) -> float:
     """How far a block charges the zone: the upper bound in comfort time or when comfort starts within
-    ``z.precharge_h`` hours – but only if there is comfort CHARGE_MIN_COMFORT_H hours ahead or later (near the end of
-    comfort the charge would outlast its use). Otherwise the current lower bound: comfort − band, outside the base
-    (a room nobody uses before next week stays cool)."""
+    ``z.precharge_h`` hours, otherwise the current lower bound (a room nobody uses before next week stays cool).
+    In comfort time it charges only if there is comfort CHARGE_MIN_COMFORT_H hours ahead or later – near the end of
+    comfort the charge would outlast its use, so it holds comfort − band. Before a short comfort window (e.g. one
+    hour at bedtime) it still charges: that charge is what the window needs."""
 
     def comfort_in(first: int, last: int) -> bool:
         return any(zone_comfort(z, when + timedelta(hours=h)) is not None for h in range(first, last + 1))
 
-    soon = comfort_in(0, z.precharge_h)
-    if soon and comfort_in(CHARGE_MIN_COMFORT_H, max(CHARGE_MIN_COMFORT_H, z.precharge_h)):
-        return zone_high(z)
-    return zone_floor(z, when)
+    if zone_comfort(z, when) is not None:
+        ending = not comfort_in(CHARGE_MIN_COMFORT_H, max(CHARGE_MIN_COMFORT_H, z.precharge_h))
+        return zone_floor(z, when) if ending else zone_high(z)
+    return zone_high(z) if comfort_in(0, z.precharge_h) else zone_floor(z, when)
 
 
 def zone_charge_cap(z: ZoneRuntime, when: datetime) -> float | None:

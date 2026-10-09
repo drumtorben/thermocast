@@ -135,8 +135,9 @@ Live und im Rollout: `charge_cost(w)` („Laden & Zehren“, Spec `docs/superpow
   Ohne das sah der Ein-Block-Planer den nächsten Start nie, und der Regler wirkte nicht.
 - Läuft ein Block schon (`running`), kostet Weiterheizen keinen Start (sonst bricht die Neuplanung Blöcke ab).
 - BT-gesteuerte Zonen sind gedeckelt (`charge_cap`): q = 0, sobald die Zone ihr Ladeziel (Ruhezeit: Grundwert) erreicht.
-  Ladeziel (`zone_charge_target`) = Obergrenze in der Komfortzeit oder wenn sie bald beginnt (Option `precharge_hours`, Standard 12 h) und
-  in ≥ 3 h noch/wieder Komfort ist (`CHARGE_MIN_COMFORT_H`, sonst lädt der Block kurz vor Komfortende für den leeren Abend), sonst
+  Ladeziel (`zone_charge_target`) = Obergrenze in der Komfortzeit oder wenn sie bald beginnt (Option `precharge_hours`, Standard 12 h);
+  in der Komfortzeit nur, wenn in ≥ 3 h noch/wieder Komfort ist (`CHARGE_MIN_COMFORT_H`, sonst lädt der Block kurz vor
+  Komfortende für den leeren Abend; vor einem kurzen Fenster, z. B. 1 h zur Bettzeit, wird weiter vorgeladen), sonst
   Untergrenze (Komfort − Band bzw. Grundwert) – Anlass: ein Raum ohne Komfort am Wochenende wurde in den Blöcken anderer Zonen bis zur Obergrenze geladen.
 - **Wenig Abnehmer** (`cycling`): Blockstunden, in denen BT-Räume zu sind (Anteil an allen BT-Räumen), kosten
   `(1+9w)·24/(Start+Länge+Zehrzeit)·60/45` je Stunde – mit wenigen offenen Kreisen taktet der Brenner im Block

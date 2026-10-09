@@ -97,6 +97,16 @@ async def test_no_charging_near_the_end_of_comfort(hass: HomeAssistant) -> None:
     assert zone_charge_target(z, _local(hass, 10)) == 22.5 and zone_charge_target(z, _local(hass, 7)) == 17.0
 
 
+async def test_short_comfort_window_is_still_precharged(hass: HomeAssistant) -> None:
+    """A one-hour window at bedtime: the hours before it charge (that is what the window needs), the window holds."""
+    z = _z(**{CONF_BT_CONTROL: True, CONF_BT_ENTITY: "climate.bt", CONF_COMFORT_HIGH: 22.5, CONF_BASE_TEMP: 17.0})
+    z.schedule_plan = {"tuesday": [{"from": "18:00:00", "to": "19:00:00"}]}
+    assert zone_charge_target(z, _local(hass, 15)) == 22.5
+    assert zone_charge_target(z, _local(hass, 17)) == 22.5  # 1 h before: charge
+    assert zone_charge_target(z, _local(hass, 18)) == 20.2  # in the window, ending: hold comfort − band
+    assert zone_charge_target(z, _local(hass, 19)) == 17.0  # over: base
+
+
 async def test_open_window_neither_leads_nor_takes_heat(hass: HomeAssistant) -> None:
     from custom_components.thermocast.coordinator import build_plan_inputs
     from custom_components.thermocast.core.forecast import Forecast
