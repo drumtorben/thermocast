@@ -76,7 +76,14 @@ from .core.model import HourRecord, OnlineZoneModel, SurfaceSpec, ZoneSpec, upda
 from .core.planner import PlanResult, ZonePlanInput, charge_cost, plan
 from .core.quality import ForecastLog, RingLog, calibration, measured_by_hour, param_snapshot, std_scale_profile
 from .core.rollout import block_lengths_for
-from .core.rules import binary_value, hvac_heating, trim_tail_restart, window_recovering, window_recovery_temp
+from .core.rules import (
+    binary_value,
+    hvac_heating,
+    next_on_hours,
+    trim_tail_restart,
+    window_recovering,
+    window_recovery_temp,
+)
 from .core.weather import OutdoorBias
 from .events import EventLog
 from .view_builder import ViewBuilder
@@ -201,7 +208,7 @@ class ThermocastData:
     block_end: datetime | None
     failsafe_reason: str | None
     forecast_age_min: float | None
-    override: str | None = None  # observe | failsafe | min_block | min_pause | budget
+    override: str | None = None  # observe | failsafe | min_block | min_pause | budget | bridge | startup | warmstart
     planner_heat: bool | None = None  # raw planner wish (before fail-safe)
     bt: dict[str, dict[str, Any]] = field(default_factory=dict)  # Better Thermostat target per controlled zone
 
@@ -739,7 +746,11 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
         if want_heat and not failsafe and not holding and not learning and self._trim_tail(now, result["block_end"]):
             want_heat = False
             self.events.add(now, "block_trimmed", dedupe=timedelta(hours=1))
-        release, override = await self.actuator.async_apply(want_heat, self.control_enabled, now, forced=bool(failsafe))
+        # the planner pauses only briefly: its next block would fall into the minimum pause -> bridge it
+        next_on = None if result["want_heat"] else next_on_hours(result["block_start"], now)
+        release, override = await self.actuator.async_apply(
+            want_heat, self.control_enabled, now, forced=bool(failsafe), next_on_h=next_on
+        )
         if failsafe:
             override = "failsafe"
         elif holding:

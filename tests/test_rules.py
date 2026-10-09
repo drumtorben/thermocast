@@ -11,6 +11,8 @@ from core.rules import (
     Rules,
     apply_rules,
     binary_value,
+    hold_until,
+    next_on_hours,
     release_state,
     trim_tail_restart,
     window_recovering,
@@ -29,6 +31,31 @@ def test_turn_off_respects_min_block_and_budget():
     assert apply_rules(False, True, 1.0, 0, R) == (True, "min_block")
     assert apply_rules(False, True, 5.0, 4, R) == (True, "budget")
     assert apply_rules(False, True, 5.0, 3, R) == (False, None)
+
+
+def test_short_pause_is_bridged():
+    # the next block would start before the 2 h pause is over: ending the block only delays it
+    assert apply_rules(False, True, 5.0, 0, R, next_on_h=1.8) == (True, "bridge")
+    assert apply_rules(False, True, 5.0, 0, R, next_on_h=2.5) == (False, None)
+    assert apply_rules(False, True, 5.0, 0, R, next_on_h=None) == (False, None)
+    assert apply_rules(False, True, 1.0, 0, R, next_on_h=1.0) == (True, "min_block")  # owed block first
+    assert apply_rules(False, False, 5.0, 0, R, next_on_h=1.0) == (False, None)  # already off: nothing to bridge
+
+
+def test_next_on_hours():
+    now = datetime(2026, 10, 9, 7, 12, 40, tzinfo=UTC)
+    assert next_on_hours(datetime(2026, 10, 9, 9, tzinfo=UTC), now) == (timedelta(hours=1, minutes=47, seconds=20)
+                                                                        .total_seconds() / 3600)
+    assert next_on_hours(datetime(2026, 10, 9, 7, tzinfo=UTC), now) is None  # running block (e.g. trimmed)
+    assert next_on_hours(None, now) is None
+
+
+def test_hold_until():
+    t = datetime(2026, 10, 9, 7, 12, 40, tzinfo=UTC)
+    assert hold_until("min_pause", t, R) == t + timedelta(hours=2)
+    assert hold_until("min_block", t, R) == t + timedelta(hours=3)
+    assert hold_until("budget", t, R) is None
+    assert hold_until("min_pause", None, R) is None
 
 
 def test_turn_on_ignores_budget():

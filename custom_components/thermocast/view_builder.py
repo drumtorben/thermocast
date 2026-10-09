@@ -45,7 +45,7 @@ from .core.model import Prediction
 from .core.planner import charge_cost
 from .core.quality import hindcast
 from .core.rollout import ActuatorState, block_lengths_for
-from .core.rules import apply_rules, binary_value, release_state
+from .core.rules import apply_rules, binary_value, hold_until, next_on_hours, release_state
 from .core.series import hourly_fraction, hourly_increase, hourly_mean, mask_off
 from .core.view import ZoneViewInput, align, build_view, compute_outlook, make_window
 from .history import async_fetch_attribute, async_fetch_states
@@ -116,7 +116,10 @@ class ViewBuilder:
         if data.failsafe_reason:
             return  # a fail-safe allows heating but is no planned block (the real actuator owes no minimum block)
         elapsed = (now - self._shadow_change).total_seconds() / 3600 if self._shadow_change else math.inf
-        target, _ = apply_rules(data.want_heat, self._shadow_on, elapsed, self._shadow_switches, self._c.actuator.rules)
+        next_on = None if data.want_heat else next_on_hours(data.block_start, now)
+        target, _ = apply_rules(
+            data.want_heat, self._shadow_on, elapsed, self._shadow_switches, self._c.actuator.rules, next_on
+        )
         if target != self._shadow_on:
             self._shadow_on, self._shadow_change = target, now
             self._shadow_switches += 1
@@ -187,6 +190,8 @@ class ViewBuilder:
             "applied": data.release_on,
             "control_enabled": data.control_enabled,
             "override": data.override,
+            "hold_until": until.isoformat() if (until := hold_until(data.override, a.last_change, rules)) else None,
+            "next_block_start": data.block_start.isoformat() if data.block_start else None,
             "failsafe_reason": data.failsafe_reason,
             "switches_today": a.switches_today,
             "max_switches": rules.max_switches,

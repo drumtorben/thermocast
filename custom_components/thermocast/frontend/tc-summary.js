@@ -96,6 +96,18 @@ class TcSummary extends LitElement {
     return notes.length ? html`<p class="note">${notes.join(" · ")}</p>` : nothing;
   }
 
+  _overrideNote() {
+    const d = this.view.decision;
+    const o = d.override;
+    const L = this.lang;
+    let text;
+    if (o === "bridge") text = t(L, "override_bridge", { start: this._when(d.next_block_start) });
+    else if (d.hold_until && (o === "min_block" || o === "min_pause"))
+      text = t(L, `override_${o}_until`, { until: fmtTime(d.hold_until, L, this.tz) });
+    else if (["min_block", "min_pause", "budget", "startup", "warmstart"].includes(o)) text = t(L, "override_" + o);
+    return text ? html`<p class="note">${text}</p>` : nothing;
+  }
+
   _chips() {
     const { decision: d, robustness: r } = this.view;
     const L = this.lang;
@@ -118,10 +130,7 @@ class TcSummary extends LitElement {
 
   render() {
     if (!this.view) return nothing;
-    const o = this.view.decision.override;
-    const overrideNote = ["min_block", "min_pause", "budget", "startup", "warmstart"].includes(o)
-      ? html`<p class="note">${t(this.lang, "override_" + o)}</p>`
-      : nothing;
+    const overrideNote = this._overrideNote();
     return html`
       <div class="card">
         <div class="headline">${this._headline()}</div>

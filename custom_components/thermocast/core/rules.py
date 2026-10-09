@@ -14,18 +14,38 @@ class Rules:
 
 
 def apply_rules(
-    want: bool, current: bool, elapsed_h: float, switches_today: int, rules: Rules
+    want: bool, current: bool, elapsed_h: float, switches_today: int, rules: Rules, next_on_h: float | None = None
 ) -> tuple[bool, str | None]:
     """Turning ON is always allowed except during the minimum pause (anti short-cycling);
-    turning OFF needs the minimum block and budget left (fail-safe direction = heating allowed)."""
+    turning OFF needs the minimum block and budget left (fail-safe direction = heating allowed).
+
+    ``next_on_h``: hours until the planner's next block. If it starts before the minimum pause would be over,
+    the block is bridged instead of ended – the pause would only delay that block and cost a start."""
     if current and not want:
         if elapsed_h < rules.min_block_h:
             return True, "min_block"
         if switches_today >= rules.max_switches:
             return True, "budget"
+        if next_on_h is not None and next_on_h < rules.min_pause_h:
+            return True, "bridge"
     elif not current and want and elapsed_h < rules.min_pause_h:
         return False, "min_pause"
     return want, None
+
+
+def hold_until(override: str | None, last_change: datetime | None, rules: Rules) -> datetime | None:
+    """When the minimum block or pause that holds back the planner's wish is over."""
+    if last_change is None:
+        return None
+    hours = {"min_block": rules.min_block_h, "min_pause": rules.min_pause_h}.get(override or "")
+    return None if hours is None else last_change + timedelta(hours=hours)
+
+
+def next_on_hours(block_start: datetime | None, now: datetime) -> float | None:
+    """Hours until the planned block starts; None if none is planned or it is already running."""
+    if block_start is None or block_start <= now:
+        return None
+    return (block_start - now).total_seconds() / 3600
 
 
 TAIL_MIN = timedelta(minutes=15)  # a burner run shorter than this at the very end of a block is not worth a start

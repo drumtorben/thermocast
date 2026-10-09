@@ -117,6 +117,23 @@ async def test_failsafe_overrides_pause_and_owes_no_block(hass: HomeAssistant) -
     assert (on, reason) == (False, None) and hass.states.get("number.summer_threshold").state == "10"
 
 
+async def test_block_is_bridged_when_the_next_one_falls_into_the_pause(hass: HomeAssistant) -> None:
+    async def follow(call):
+        hass.states.async_set("number.summer_threshold", str(int(call.data["value"])))
+
+    hass.services.async_register("number", "set_value", follow)
+    hass.states.async_set("number.summer_threshold", "16")
+    act, _ = _actuator(hass, {"min_block_hours": 1, "min_pause_hours": 2, "max_switches_per_day": 12})
+    await act.async_apply(True, True, T0 - timedelta(hours=3))
+    # planner pauses, but plans the next block in 1.8 h – the minimum pause would delay it: stay on
+    on, reason = await act.async_apply(False, True, T0, next_on_h=1.8)
+    assert (on, reason) == (True, "bridge") and hass.states.get("number.summer_threshold").state == "16"
+    assert act.switches_today == 0
+    # a real pause (next block after the minimum pause) still ends the block
+    on, reason = await act.async_apply(False, True, T0 + timedelta(minutes=15), next_on_h=3.0)
+    assert (on, reason) == (False, None) and hass.states.get("number.summer_threshold").state == "10"
+
+
 async def test_reconfigured_entity_drops_pending_write(hass: HomeAssistant) -> None:
     async_mock_service(hass, "number", "set_value")
     hass.states.async_set("number.summer_threshold", "16")

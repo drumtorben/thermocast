@@ -161,6 +161,9 @@ für die Wärmepumpe später COP(T_out, Vorlauf), Strompreis, PV-Überschuss.
 - Standard: **Beobachtungsmodus** (`switch.…_steuerung_aktiv` aus) → nichts wird geschaltet.
 - AN (Heizen erlaubt) ist immer erlaubt; AUS nur nach Mindestblock und im Tagesbudget
   (Standard ≤ 12 Wechsel/Tag); erneutes AN erst nach Mindestpause.
+- **Überbrücken** (`bridge`): will der Planer AUS, plant aber den nächsten Block vor Ende der Mindestpause, bleibt
+  die Heizung an (live, Schatten-Aktor und Rollout). Anlass: nach einer Optionsänderung AUS, 18 min später wollte der
+  Planer wieder heizen → 2 h gesperrt trotz geplantem Block. Panel nennt bei Mindestpause/-block die Uhrzeit (`hold_until`).
 - Gleicher Zustand wird nicht erneut geschrieben (EEPROM).
 - Fail-safe → AN: Update-Exception, Prognose > 2 h alt, fehlender Sensor einer führenden Zone,
   Integration entladen, Steuerung ausgeschaltet.
@@ -198,7 +201,7 @@ Attr. Parameter + Sonnenantwort je Fläche).
 
 ---
 
-## 4. Status (v0.8.1)
+## 4. Status (v0.8.2)
 
 - ✅ Kern getestet auf synthetischen Daten: 1-Schritt-MAE ≈ 0,03 K/h, 24-h-Prognose-MAE ≈ 0,1 K,
   Ostfenster und Süddach werden getrennt gelernt, Planer heizt bei −5 °C, nicht bei 18 °C.
@@ -263,7 +266,8 @@ Attr. Parameter + Sonnenantwort je Fläche).
   v0.7.11: kein Laden in den letzten 3 h der Komfortzeit (Komfort − Band halten), kurze Fenster weiter vorgeladen;
   v0.8.0: Wetter – ICON + ECMWF gemittelt, Prognose auf den Außenfühler korrigiert, Wetter-σ aus dem Modellabstand
   (Tab „Modell“: Karte „Wetter & Außenfühler“); v0.8.1: Setup startet den Warmstart auch, wenn nur der Fühler-Offset
-  fehlt (vorher nur bei neuen Zonen → bestehende Anlagen blieben unkorrigiert).
+  fehlt (vorher nur bei neuen Zonen → bestehende Anlagen blieben unkorrigiert);
+  v0.8.2: kurze Pausen überbrücken (nächster Block vor Ende der Mindestpause → an lassen), Panel nennt „bis wann“.
   Erkenntnis an der Anlage: an milden Tagen liefert die witterungsgeführte Kurve kaum Vorlauf → Fußpunkt anheben
   (README); längere Fenster-Verzögerungen (0–3 h) getestet und verworfen (MAE minimal schlechter).
 - Bekannte Schwächen:

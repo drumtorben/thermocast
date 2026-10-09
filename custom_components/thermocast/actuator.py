@@ -189,12 +189,13 @@ class Actuator:
 
     # ------------------------------------------------------------------ logic
     async def async_apply(
-        self, want_on: bool, enabled: bool, now: datetime, forced: bool = False
+        self, want_on: bool, enabled: bool, now: datetime, forced: bool = False, next_on_h: float | None = None
     ) -> tuple[bool, str | None]:
         """Apply the planner decision. Returns (intended release state, reason it differs from the planner).
 
         ``forced`` (fail-safe): heating allowed immediately, past any minimum pause – but it is not a planned
         block, so once the fail-safe ends the planner may switch off again without serving a minimum block.
+        ``next_on_h``: hours until the planner's next block (bridged if it starts within the minimum pause).
         """
         self.last_decision = want_on
         if not enabled:
@@ -211,7 +212,7 @@ class Actuator:
             return True, "failsafe"
         elapsed = math.inf if self.forced and current else self.elapsed_h(now)
         self.forced = False
-        target, reason = apply_rules(want_on, current, elapsed, self.switches_today, self.rules)
+        target, reason = apply_rules(want_on, current, elapsed, self.switches_today, self.rules, next_on_h)
         if target != current:
             if self.commanded != target:  # a new switching decision (not a retry)
                 self.last_change = now

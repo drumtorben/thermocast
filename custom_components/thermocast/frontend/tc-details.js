@@ -80,6 +80,7 @@ class TcDetails extends LitElement {
       <ul>
         ${item(d.override === "min_block", t(L, "r_min_block", { v: r.min_block_h }))}
         ${item(d.override === "min_pause", t(L, "r_min_pause", { v: r.min_pause_h }))}
+        ${item(d.override === "bridge", t(L, "r_bridge"))}
         ${item(d.override === "budget", t(L, "r_budget", { n: d.switches_today, max: d.max_switches }))}
         ${item(d.override === "observe", t(L, "r_observe"))}
         ${item(d.override === "failsafe", t(L, "r_failsafe") + (d.failsafe_reason ? `: ${d.failsafe_reason}` : ""))}

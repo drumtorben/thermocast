@@ -115,9 +115,10 @@ def rollout(
             if h == 0:
                 first = res
             want = res.heat_now
+            next_on = None if want else res.best.start
         else:
-            want = on  # the rules decide anyway
-        target, _ = apply_rules(want, on, since, switches, rules)
+            want, next_on = on, None  # the rules decide anyway
+        target, _ = apply_rules(want, on, since, switches, rules, next_on)
         if target != on:
             switches += 1
             since = 0.0
