@@ -136,7 +136,7 @@ Live und im Rollout: `charge_cost(w)` („Laden & Zehren“, Spec `docs/superpow
 - Läuft ein Block schon (`running`), kostet Weiterheizen keinen Start (sonst bricht die Neuplanung Blöcke ab).
 - BT-gesteuerte Zonen sind gedeckelt (`charge_cap`): q = 0, sobald die Zone ihr Ladeziel (Ruhezeit: Grundwert) erreicht.
   Ladeziel (`zone_charge_target`) = Obergrenze in der Komfortzeit oder wenn sie bald beginnt (Option `precharge_hours`, Standard 12 h), sonst
-  Grundwert – Anlass: Büro wurde samstags in den Wohnzimmer-Blöcken auf 22,5 °C geladen, ohne Komfort bis Montag.
+  Grundwert – Anlass: ein Raum ohne Komfort am Wochenende wurde in den Blöcken anderer Zonen bis zur Obergrenze geladen.
 - **Wenig Abnehmer** (`cycling`): Blockstunden, in denen BT-Räume zu sind (Anteil an allen BT-Räumen), kosten
   `(1+9w)·24/(Start+Länge+Zehrzeit)·60/45` je Stunde – mit wenigen offenen Kreisen taktet der Brenner im Block
   (Taktsperre 45 min). Legt Blöcke in Stunden, in denen viele Räume Wärme nehmen (z. B. vor einer Ruhezeit).
@@ -185,7 +185,7 @@ Attr. Parameter + Sonnenantwort je Fläche).
 
 ---
 
-## 4. Status (v0.7.9)
+## 4. Status (v0.7.10)
 
 - ✅ Kern getestet auf synthetischen Daten: 1-Schritt-MAE ≈ 0,03 K/h, 24-h-Prognose-MAE ≈ 0,1 K,
   Ostfenster und Süddach werden getrennt gelernt, Planer heizt bei −5 °C, nicht bei 18 °C.
@@ -245,7 +245,8 @@ Attr. Parameter + Sonnenantwort je Fläche).
   v0.7.6: Zehrzeit hinter dem Horizont bis 48 h, Open-Meteo nacheinander mit 429-Retry;
   v0.7.7: Story – vom Rollout verhinderte Unterschreitung heißt „Block geplant“, nicht „in Kauf genommen“;
   v0.7.8: Gleichstand → späterer Start (nur Blöcke, die den Horizont abdecken);
-  v0.7.9: Kandidaten-Tabelle – Summe vorn, Null-Spalten weg, für alle gleiche Anteile ausgegraut.
+  v0.7.9: Kandidaten-Tabelle – Summe vorn, Null-Spalten weg, für alle gleiche Anteile ausgegraut;
+  v0.7.10: BT-Ladeziel außerhalb der Komfortzeit = Grundwert, außer Komfort beginnt bald (Option „Vorladen“, 12 h).
   Erkenntnis an der Anlage: an milden Tagen liefert die witterungsgeführte Kurve kaum Vorlauf → Fußpunkt anheben
   (README); längere Fenster-Verzögerungen (0–3 h) getestet und verworfen (MAE minimal schlechter).
 - Bekannte Schwächen:
