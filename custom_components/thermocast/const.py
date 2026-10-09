@@ -35,6 +35,7 @@ CONF_ANTI_CYCLE_MIN = "anti_cycle_minutes"  # boiler anti-cycling lock; 0 = don'
 DEFAULT_ANTI_CYCLE_MIN = 0
 CONF_PRECHARGE_H = "precharge_hours"  # outside comfort time a block charges a BT zone only if comfort starts
 DEFAULT_PRECHARGE_H = 12  # within this many hours (0 = only in comfort time)
+CHARGE_MIN_COMFORT_H = 3  # … and only if there is comfort this many hours ahead or later (not near its end)
 
 DEFAULT_MIN_BLOCK_H = 3
 DEFAULT_MIN_PAUSE_H = 2

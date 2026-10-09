@@ -175,7 +175,7 @@
           "calibrate_sigma": "Widens σ per forecast horizon so that ±σ covers ~68 % of the forecast errors observed in the last 14 days (needs ≥ 48 checks per horizon; never narrows it).",
           "starts_weight": "0 = short blocks, little gas; 100 = few long blocks that charge the rooms up to their upper bound.",
           "anti_cycle_minutes": "Minimum time between two burner starts as set at the boiler (0 = off). Needs the burner starts sensor: a block then ends just before a restart that would only run a few minutes.",
-          "precharge_hours": "A block charges a thermostat-controlled room up to its upper bound in comfort time and this many hours before it starts; otherwise only to its base temperature (0 = only in comfort time)."
+          "precharge_hours": "A block charges a thermostat-controlled room up to its upper bound in comfort time and this many hours before it starts, but not in the last 3 h of comfort (the charge would outlast its use); otherwise it only holds its lower bound (0 = only in comfort time)."
         }
       }
     }

@@ -1,7 +1,7 @@
 """Which target to give a zone's Better Thermostat – a pure decision (no HA imports).
 
 During a heating block the room may charge up to its charge target (the upper bound, or only the base
-temperature when comfort is far away); otherwise it is held at its lower bound (comfort − band in comfort
+temperature when comfort is far away or about to end); otherwise it is held at its lower bound (comfort − band in comfort
 time, the base temperature outside). Quiet time: the base temperature
 is set once shortly before, then nothing is written (valve noise) – unless a leading zone gets cold.
 """
@@ -24,7 +24,7 @@ class BtInput:
     block_on: bool  # the heat source is released (a block runs)
     failsafe: bool  # fail-safe: hold the lower bound, never charge
     floor_now: float  # current lower bound of the zone
-    high: float  # charge target in a block (upper bound, or the base when comfort is far away)
+    high: float  # charge target in a block (upper bound, or the lower bound when comfort is far away or ends soon)
     base: float  # base temperature (quiet time)
     quiet_now: bool
     quiet_soon: bool  # quiet time starts within the lead time

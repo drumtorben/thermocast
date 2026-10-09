@@ -21,6 +21,7 @@ from homeassistant.util import dt as dt_util
 from .actuator import Actuator
 from .const import (
     CALIBRATION_DAYS,
+    CHARGE_MIN_COMFORT_H,
     CONF_ACTIVE_FROM,
     CONF_ACTIVE_TO,
     CONF_ANTI_CYCLE_MIN,
@@ -263,10 +264,17 @@ def zone_quiet(z: ZoneRuntime, when: datetime, lead: timedelta = timedelta(0)) -
 
 def zone_charge_target(z: ZoneRuntime, when: datetime) -> float:
     """How far a block charges the zone: the upper bound in comfort time or when comfort starts within
-    ``z.precharge_h`` hours, otherwise only the base temperature (a room nobody uses before next week stays cool)."""
-    if any(zone_comfort(z, when + timedelta(hours=h)) is not None for h in range(z.precharge_h + 1)):
+    ``z.precharge_h`` hours – but only if there is comfort CHARGE_MIN_COMFORT_H hours ahead or later (near the end of
+    comfort the charge would outlast its use). Otherwise the current lower bound: comfort − band, outside the base
+    (a room nobody uses before next week stays cool)."""
+
+    def comfort_in(first: int, last: int) -> bool:
+        return any(zone_comfort(z, when + timedelta(hours=h)) is not None for h in range(first, last + 1))
+
+    soon = comfort_in(0, z.precharge_h)
+    if soon and comfort_in(CHARGE_MIN_COMFORT_H, max(CHARGE_MIN_COMFORT_H, z.precharge_h)):
         return zone_high(z)
-    return zone_base(z)
+    return zone_floor(z, when)
 
 
 def zone_charge_cap(z: ZoneRuntime, when: datetime) -> float | None:

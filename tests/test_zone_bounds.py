@@ -83,6 +83,20 @@ async def test_charge_target_outside_comfort(hass: HomeAssistant) -> None:
     assert zone_charge_target(z, _local(hass, 7)) == 17.0 and zone_charge_target(z, _local(hass, 8)) == 22.5
 
 
+async def test_no_charging_near_the_end_of_comfort(hass: HomeAssistant) -> None:
+    """In the last CHARGE_MIN_COMFORT_H of comfort the zone holds comfort − band: the charge would outlast its use."""
+    z = _z(**{CONF_BT_CONTROL: True, CONF_BT_ENTITY: "climate.bt", CONF_COMFORT_HIGH: 22.5, CONF_BASE_TEMP: 17.0})
+    z.schedule_plan = {"tuesday": [{"from": "08:00:00", "to": "15:00:00"}]}  # 2026-10-06 is a Tuesday
+    assert zone_charge_target(z, _local(hass, 11)) == 22.5  # comfort until 15:00, still 4 h
+    assert zone_charge_target(z, _local(hass, 12)) == 20.2  # 3 h left: hold comfort − band (20.5 − 0.3)
+    assert zone_charge_target(z, _local(hass, 14)) == 20.2
+    assert zone_charge_cap(z, _local(hass, 13)) == 20.2  # the planner sees the same target
+    z.schedule_plan["tuesday"].append({"from": "17:00:00", "to": "22:00:00"})  # comfort again in the evening
+    assert zone_charge_target(z, _local(hass, 13)) == 22.5  # the charge carries into the next window
+    z.precharge_h = 0
+    assert zone_charge_target(z, _local(hass, 10)) == 22.5 and zone_charge_target(z, _local(hass, 7)) == 17.0
+
+
 async def test_open_window_neither_leads_nor_takes_heat(hass: HomeAssistant) -> None:
     from custom_components.thermocast.coordinator import build_plan_inputs
     from custom_components.thermocast.core.forecast import Forecast

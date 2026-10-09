@@ -135,8 +135,9 @@ Live und im Rollout: `charge_cost(w)` („Laden & Zehren“, Spec `docs/superpow
   Ohne das sah der Ein-Block-Planer den nächsten Start nie, und der Regler wirkte nicht.
 - Läuft ein Block schon (`running`), kostet Weiterheizen keinen Start (sonst bricht die Neuplanung Blöcke ab).
 - BT-gesteuerte Zonen sind gedeckelt (`charge_cap`): q = 0, sobald die Zone ihr Ladeziel (Ruhezeit: Grundwert) erreicht.
-  Ladeziel (`zone_charge_target`) = Obergrenze in der Komfortzeit oder wenn sie bald beginnt (Option `precharge_hours`, Standard 12 h), sonst
-  Grundwert – Anlass: ein Raum ohne Komfort am Wochenende wurde in den Blöcken anderer Zonen bis zur Obergrenze geladen.
+  Ladeziel (`zone_charge_target`) = Obergrenze in der Komfortzeit oder wenn sie bald beginnt (Option `precharge_hours`, Standard 12 h) und
+  in ≥ 3 h noch/wieder Komfort ist (`CHARGE_MIN_COMFORT_H`, sonst lädt der Block kurz vor Komfortende für den leeren Abend), sonst
+  Untergrenze (Komfort − Band bzw. Grundwert) – Anlass: ein Raum ohne Komfort am Wochenende wurde in den Blöcken anderer Zonen bis zur Obergrenze geladen.
 - **Wenig Abnehmer** (`cycling`): Blockstunden, in denen BT-Räume zu sind (Anteil an allen BT-Räumen), kosten
   `(1+9w)·24/(Start+Länge+Zehrzeit)·60/45` je Stunde – mit wenigen offenen Kreisen taktet der Brenner im Block
   (Taktsperre 45 min). Legt Blöcke in Stunden, in denen viele Räume Wärme nehmen (z. B. vor einer Ruhezeit).
@@ -171,7 +172,7 @@ für die Wärmepumpe später COP(T_out, Vorlauf), Strompreis, PV-Überschuss.
 - **Taktsperre** (Option `anti_cycle_minutes` + Sensor Brennerstarts): endet die Sperre vor dem nächsten Update und
   liefe der folgende Neustart < 15 min bis Blockende, endet der Block jetzt (`trim_tail_restart`, Ereignis
   `block_trimmed`) – spart den kurzen letzten Start.
-- BT-Aktor (opt-in je Zone): im Block Ladeziel (Obergrenze, fern vom Komfort Grundwert), sonst Untergrenze; nur bei Änderung, 0,5-K-Schritte,
+- BT-Aktor (opt-in je Zone): im Block Ladeziel (Obergrenze; fern vom Komfort oder kurz vor Komfortende Untergrenze), sonst Untergrenze; nur bei Änderung, 0,5-K-Schritte,
   15–24 °C, ≤ 24/Tag; Handeingriff → Zone ruht bis Blockende (≥ 3 h); Ruhezeit: 15 min vorher Grundwert,
   dann nichts (Ausnahme: führende Zone < Grundwert − 1 K); Steuerung aus/Entladen → Untergrenze.
 

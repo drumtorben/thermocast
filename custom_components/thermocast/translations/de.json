@@ -175,7 +175,7 @@
           "calibrate_sigma": "Weitet σ je Prognosehorizont so, dass ±σ etwa 68 % der in den letzten 14 Tagen beobachteten Prognosefehler abdeckt (braucht ≥ 48 Prüfungen je Horizont; verengt nie).",
           "starts_weight": "0 = kurze Blöcke, wenig Gas; 100 = wenige lange Blöcke, die die Räume bis zur Obergrenze laden.",
           "anti_cycle_minutes": "Mindestzeit zwischen zwei Brennerstarts laut Kessel (0 = aus). Braucht den Sensor für Brennerstarts: ein Block endet dann kurz vor einem Neustart, der nur noch wenige Minuten laufen würde.",
-          "precharge_hours": "Ein Block lädt einen Raum mit Thermostat-Steuerung in der Komfortzeit und so viele Stunden vor ihrem Beginn bis zur Obergrenze, sonst nur bis zum Grundwert (0 = nur in der Komfortzeit)."
+          "precharge_hours": "Ein Block lädt einen Raum mit Thermostat-Steuerung in der Komfortzeit und so viele Stunden vor ihrem Beginn bis zur Obergrenze, aber nicht in den letzten 3 h der Komfortzeit (die Ladung hielte länger, als sie gebraucht wird); sonst hält er nur die Untergrenze (0 = nur in der Komfortzeit)."
         }
       }
     }
