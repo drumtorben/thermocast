@@ -286,6 +286,39 @@ async def test_dhw_charging_is_not_space_heating(hass: HomeAssistant, mock_entry
     assert z.log.to_list()[-1]["rec"]["q"] > 40
 
 
+async def test_outdoor_sensor_offset_moves_the_forecast(
+    hass: HomeAssistant, mock_entry, mock_open_meteo, freezer, hass_storage
+) -> None:
+    """The outdoor sensor reads 2 K above the forecast: each closed hour teaches the offset, the plan uses it."""
+    from custom_components.thermocast.coordinator import build_plan_inputs
+    from custom_components.thermocast.core.forecast import T_SD_FLOOR
+    from custom_components.thermocast.core.weather import BIAS_ALPHA, BIAS_MIN_WEIGHT
+
+    freezer.move_to("2026-10-04 10:05:00+00:00")
+    mock_open_meteo(5.0)
+    await _setup_states(hass)
+    hass.states.async_set("sensor.outdoor", "7.0", {"device_class": "temperature"})
+    await _setup_entry(hass, mock_entry)
+    c = mock_entry.runtime_data
+    assert c.outdoor_bias.empty and c.forecast.t_out[0] == 5.0
+
+    freezer.move_to("2026-10-04 11:05:00+00:00")
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    expect = 2.0 * BIAS_ALPHA / BIAS_MIN_WEIGHT  # one day of samples: shrunk towards 0
+    assert c.outdoor_bias.weight[10] > 0 and c.outdoor_bias.offset(c.forecast.times[0]) == pytest.approx(expect)
+    assert c.forecast.t_out[0] == pytest.approx(5.0 + expect) and c.forecast.t_out_raw[0] == 5.0
+    from homeassistant.util import dt as dt_util
+
+    idx0 = c.forecast.index_of(dt_util.utcnow())
+    inputs = build_plan_inputs(hass, c.zones, c.forecast, idx0, 12)
+    assert inputs[0].future[0].t_out == pytest.approx(5.0 + expect)
+    assert 0 < inputs[0].future[0].t_out_sd < inputs[0].future[11].t_out_sd == pytest.approx(T_SD_FLOOR)
+
+    await c.async_save()
+    assert hass_storage[f"{DOMAIN}.{mock_entry.entry_id}"]["data"]["outdoor"]["bias"]["weight"][10] > 0
+
+
 async def test_radiator_heats_only_while_its_thermostat_heats(
     hass: HomeAssistant, mock_entry, mock_open_meteo, freezer
 ) -> None:

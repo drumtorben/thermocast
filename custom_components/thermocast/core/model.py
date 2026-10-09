@@ -94,6 +94,9 @@ class HourRecord:
     neighbors: tuple[float, ...] = ()
     gains: tuple[float, ...] = ()
     valid: bool = True  # False e.g. while a window is open
+    # weather uncertainty of a forecast hour (σ of t_out in K, of irr in W/m²) – not stored, measured hours have none
+    t_out_sd: float = 0.0
+    irr_sd: dict[str, float] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -150,8 +153,9 @@ def update_q_on(q_on: float | None, q: float, pump_share: float | None) -> float
 @dataclass
 class Prediction:
     mean: list[float]
-    std: list[float]
+    std: list[float]  # model and weather uncertainty: sqrt(model variance + weather²)
     contrib: list[dict[str, float]] = field(default_factory=list)  # per hour: change by cause (K/h)
+    weather: list[float] = field(default_factory=list)  # per hour: σ share of the weather forecast (K)
 
     def lower(self, z: float = 1.0) -> list[float]:
         return [m - z * s for m, s in zip(self.mean, self.std)]
@@ -209,6 +213,10 @@ class OnlineZoneModel:
             names.append(f"gain:{i}")
             nonneg.append(True)
         self.names = names
+        self._solar_cols = [  # (surface key, lag, column) – same order as the features
+            (key, lag, 2 + i) for i, (key, lag) in enumerate((s.key, lag) for s in self.spec.surfaces for lag in s.lags)
+        ]
+        self._neighbor_cols = [i for i, n in enumerate(names) if n.startswith("neighbor:")]
         self.nonneg = np.array(nonneg)
         self.dim = len(names)
         self.groups = [_group_of(n) for n in names]
@@ -309,6 +317,37 @@ class OnlineZoneModel:
             self.history = self.history[-keep:]
 
     # ----------------------------------------------------------------- predict
+    def weather_std(
+        self, future: list[HourRecord], history: list[HourRecord] | None = None, w0: float = 0.0
+    ) -> list[float]:
+        """σ share of the weather forecast per predicted hour (K).
+
+        An error e in the outdoor temperature shifts the next hour by a·e, an irradiance error by Σ b·e (lagged
+        like the sun). Weather errors last for hours (a whole model run is too warm or too cloudy), so they add up
+        linearly instead of as independent noise; the room forgets an old error at the rate of its losses.
+        ``w0`` carries the share across the rollout's re-plans.
+        """
+        hist = list(self.history if history is None else history)
+        seq = hist + list(future)
+        n_h = len(hist)
+        th = self.theta
+        decay = max(0.0, 1.0 - float(th[1]) - sum(float(th[c]) for c in self._neighbor_cols))
+        w, out = float(w0), []
+        for t, rec in enumerate(future):
+            step = float(th[1]) * rec.t_out_sd
+            for key, lag, col in self._solar_cols:
+                if lag == 0:
+                    past = rec
+                elif n_h + t >= lag:
+                    past = seq[n_h + t - lag]
+                else:  # fewer records than the lag: the oldest one (as in ``features``)
+                    past = seq[0] if n_h + t > 0 else rec
+                if past.irr_sd:
+                    step += float(th[col]) * past.irr_sd.get(key, 0.0)
+            w = decay * w + step
+            out.append(w)
+        return out
+
     def predict(
         self,
         temp_now: float,
@@ -316,12 +355,14 @@ class OnlineZoneModel:
         var0: float = 0.0,
         history: list[HourRecord] | None = None,
         with_contrib: bool = True,
+        w0: float = 0.0,
     ) -> Prediction:
         """Roll the model forward. ``future[i].temp`` is ignored (simulated).
 
-        ``var0`` is the variance of ``temp_now`` (rollouts carry uncertainty across re-plans);
-        ``history`` replaces the model's own lag history without modifying it.
+        ``var0`` is the model variance of ``temp_now`` and ``w0`` its weather σ share (rollouts carry uncertainty
+        across re-plans); ``history`` replaces the model's own lag history without modifying it.
         """
+        weather = self.weather_std(future, history, w0)
         hist = list(self.history if history is None else history)
         keep = max(self.spec.max_lag, 1)
         temp = temp_now
@@ -330,7 +371,7 @@ class OnlineZoneModel:
         contribs: list[dict[str, float]] = []
         var = var0
         sigma2 = self.resid_var
-        for rec in future:
+        for rec, w in zip(future, weather):
             r = HourRecord(
                 temp=temp,
                 t_out=rec.t_out,
@@ -349,11 +390,11 @@ class OnlineZoneModel:
             temp = temp + float(terms.sum())
             var += sigma2 + float(phi @ self.P @ phi) * sigma2
             means.append(temp)
-            stds.append(math.sqrt(var))
+            stds.append(math.sqrt(var + w * w))
             hist.append(r)
             if len(hist) > keep:
                 hist = hist[-keep:]
-        return Prediction(mean=means, std=stds, contrib=contribs)
+        return Prediction(mean=means, std=stds, contrib=contribs, weather=weather)
 
     def predict_batch(
         self,
@@ -362,13 +403,15 @@ class OnlineZoneModel:
         q: np.ndarray,
         var0: float = 0.0,
         history: list[HourRecord] | None = None,
+        w0: float = 0.0,
     ) -> tuple[np.ndarray, np.ndarray]:
         """``predict`` for many heating schedules at once (the planner's candidates).
 
         ``q`` (schedules × hours) replaces ``future[i].q``. Returns (mean, std), each schedules × hours.
         Only the temperature-dependent columns (loss, neighbours) and the heating lags differ between
-        schedules; everything else is built once per hour.
+        schedules; everything else is built once per hour (also the weather σ share).
         """
+        weather = np.asarray(self.weather_std(future, history, w0), dtype=float)
         hist = list(self.history if history is None else history)
         n_s, horizon = q.shape
         n_h = len(hist)
@@ -431,7 +474,7 @@ class OnlineZoneModel:
             v = v + sigma2 + ((phi @ self.P) * phi).sum(axis=1) * sigma2
             means[:, t] = temp
             var[:, t] = v
-        return means, np.sqrt(var)
+        return means, np.sqrt(var + weather**2)
 
     # -------------------------------------------------------------- inspection
     def params(self) -> dict[str, float]:

@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "custom_components" / "thermocast"))
 sys.path.insert(0, str(ROOT))
 
+from core.forecast import Forecast
 from core.kpi import ZoneKpiInput, daily_kpis, summary
 from core.model import HourRecord, OnlineZoneModel, SurfaceSpec, ZoneSpec
 from core.planner import ZonePlanInput, charge_cost
@@ -28,6 +29,7 @@ from core.quality import ForecastLog, QualityInput, RingLog, hindcast, param_sna
 from core.rollout import ActuatorState, block_lengths_for
 from core.rules import Rules
 from core.view import ZoneViewInput, build_view, compute_outlook, make_window
+from core.weather import OutdoorBias, weather_summary
 
 from tests.synthetic import simulate
 
@@ -190,7 +192,19 @@ def main() -> None:
         burner_starts=[(2.0 if heating[i] and not (i and heating[i - 1]) else 0.5 if heating[i] else 0.0)
                        if i < now else None for i in range(n)],
     )
-    model_view = {"version": 1, "generated_at": NOW.isoformat(), "days": 7, "zones": quality}
+    def _sample_weather() -> dict:
+        """A sensor ~1.3 K warmer than the forecast (more at noon), the models 0–2 K apart."""
+        bias = OutdoorBias()
+        hours = [NOW - (14 * 24 - i) * HOUR for i in range(14 * 24)]
+        bias.learn(hours, [5.0 + 1.3 + 0.6 * math.cos(2 * math.pi * (t.hour - 11) / 24) for t in hours], [5.0] * len(hours))
+        times = [NOW.replace(minute=0) + i * HOUR for i in range(-24, 48)]
+        fc = Forecast(times=times, t_out=[5.0] * len(times), fetched_at=NOW,
+                      t_out_spread=[abs(math.sin(i / 9)) * 2.0 for i in range(len(times))])
+        return weather_summary(bias, fc, NOW, TZ)
+
+    model_view = {
+        "version": 1, "generated_at": NOW.isoformat(), "days": 7, "zones": quality, "weather": _sample_weather(),
+    }
     kpis = _sample_kpis()
     for name, data in (("sample-view.json", view), ("sample-model.json", model_view), ("sample-kpis.json", kpis)):
         path = DEV / name

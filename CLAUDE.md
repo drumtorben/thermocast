@@ -55,7 +55,9 @@ custom_components/thermocast/
 ├── core/                 # reines Python + numpy, KEIN HA-Import (Notebook/Test-tauglich)
 │   ├── model.py          # OnlineZoneModel: ARX-Grey-Box + RLS, SurfaceSpec, ZoneSpec, HourRecord
 │   ├── forecast.py       # Open-Meteo: temperature_2m + global_tilted_irradiance je (tilt, azimuth);
-│   │                     #   nacheinander + 429-Retry (5/20 s) – parallel gab es alle paar Stunden 429
+│   │                     #   nacheinander + 429-Retry (5/20 s) – parallel gab es alle paar Stunden 429;
+│   │                     #   models=best_match,ecmwf_ifs025: T_out = Mittel, |ICON−ECMWF| → σ (T_out + Sonne je Fläche)
+│   ├── weather.py        # OutdoorBias: Fühler − Prognose je UTC-Stunde (EMA ~7 Tage), weather_summary() fürs Panel
 │   ├── planner.py        # Blockplaner: kein Block | Start 0..H × Länge {2,…,12} h, Ober-/Untergrenze,
 │   │                     #   Lade-Deckel (charge_cap), CostFn(cand, K·h kalt, K·h warm, Zehrzeit, zu-Anteil) → Komponenten
 │   ├── bt.py             # Better-Thermostat-Sollwert als reine Entscheidung (Laden/Untergrenze/Ruhezeit)
@@ -114,6 +116,15 @@ T[t+1] − T[t] = b0 + a·(T_out − T)
   Huber-Clipping (3σ), Kovarianz-Deckel (normierte Spur ≤ 50) gegen Wind-up im Sommer.
   Stunden mit offenem Fenster/Datenlücke: nicht lernen, nur Historie fortschreiben.
 - Prognose liefert Mittelwert + σ; Planer nutzt `mean − z·σ` (z = Option, Standard 1).
+- **Wetter (v0.8.0):** T_out der Prognose = Mittel ICON (best_match) + ECMWF IFS **+ Fühler-Offset** (`OutdoorBias`,
+  je UTC-Stunde, EMA α 1/7, < 3 Tage zu 0 geschrumpft; live aus dem Außenfühler-Stundenmittel vs. `t_out_raw`, beim
+  Setup aus 30 Tagen Recorder, auch für schon trainierte Zonen). Anlass: Fühler an der Garage 1,2–1,9 K wärmer als
+  jedes Modell (mittags ~2 K), Modelle lernten mit dem Fühler → Planer rechnete zu kalt. Sonne bleibt best_match
+  (Lerneingang). Wetter-σ: `t_out_sd = hypot(0,6·Rampe(6 h), 0,5·|ICON−ECMWF|)`, `irr_sd = 0,5·|ICON−ECMWF|`;
+  im Modell `w ← (1−a−Σd)·w + a·t_out_sd + Σ b·irr_sd` (korreliert → linear, `OnlineZoneModel.weather_std`),
+  σ = √(Modellvarianz + w²); Rollout trägt `var0` (ohne Wetter) und `w0` getrennt. Auswertung 14 Tage (Previous-Runs-
+  API): MAE Tag+1 1,33 K, davon ~1,2 K Bias; ohne Bias ICON 0,73 / ECMWF 0,61 / Mittel 0,60 K; Spread nur schwach
+  aussagekräftig (rms 0,6 K bei Spread < 0,5, 1,3 K bei > 2 K).
 
 ### Planer / Kosten (Gaskessel)
 
@@ -187,7 +198,7 @@ Attr. Parameter + Sonnenantwort je Fläche).
 
 ---
 
-## 4. Status (v0.7.11)
+## 4. Status (v0.8.0)
 
 - ✅ Kern getestet auf synthetischen Daten: 1-Schritt-MAE ≈ 0,03 K/h, 24-h-Prognose-MAE ≈ 0,1 K,
   Ostfenster und Süddach werden getrennt gelernt, Planer heizt bei −5 °C, nicht bei 18 °C.
@@ -249,7 +260,9 @@ Attr. Parameter + Sonnenantwort je Fläche).
   v0.7.8: Gleichstand → späterer Start (nur Blöcke, die den Horizont abdecken);
   v0.7.9: Kandidaten-Tabelle – Summe vorn, Null-Spalten weg, für alle gleiche Anteile ausgegraut;
   v0.7.10: BT-Ladeziel außerhalb der Komfortzeit = Grundwert, außer Komfort beginnt bald (Option „Vorladen“, 12 h);
-  v0.7.11: kein Laden in den letzten 3 h der Komfortzeit (Komfort − Band halten), kurze Fenster weiter vorgeladen.
+  v0.7.11: kein Laden in den letzten 3 h der Komfortzeit (Komfort − Band halten), kurze Fenster weiter vorgeladen;
+  v0.8.0: Wetter – ICON + ECMWF gemittelt, Prognose auf den Außenfühler korrigiert, Wetter-σ aus dem Modellabstand
+  (Tab „Modell“: Karte „Wetter & Außenfühler“).
   Erkenntnis an der Anlage: an milden Tagen liefert die witterungsgeführte Kurve kaum Vorlauf → Fußpunkt anheben
   (README); längere Fenster-Verzögerungen (0–3 h) getestet und verworfen (MAE minimal schlechter).
 - Bekannte Schwächen:

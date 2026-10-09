@@ -138,6 +138,14 @@ const STR = {
     m_factor: "σ ×",
     m_factor_hint: "σ × = calibration factor the planner applies (option, from 14 days of checks).",
     m_chart: "Last 7 days",
+    w_title: "Weather & outdoor sensor",
+    w_offset: "Sensor offset {k} K (from {days} days)",
+    w_offset_none: "Sensor offset: still learning",
+    w_spread: "ICON ↔ ECMWF next 24 h: ⌀ {mean} K, max {max} K",
+    w_sd: "Outdoor σ ⌀ {sd} K",
+    w_by_hour: "Sensor − forecast by hour of day",
+    w_explain:
+      "The models learned with the outdoor sensor, so the forecast (mean of ICON and ECMWF) is moved onto the sensor. Where the two weather models disagree, the forecast σ grows – outdoor temperature and sun on each surface.",
     m_explain:
       "Model: the current model simulates the past with the measured inputs (restart every midnight) – pure model error. Forecast: what the planner relied on (weather forecast and planned blocks).",
     s_measured: "measured",
@@ -326,6 +334,14 @@ const STR = {
     m_factor: "σ ×",
     m_factor_hint: "σ × = Kalibrierfaktor, den der Planer anwendet (Option, aus 14 Tagen Prüfungen).",
     m_chart: "Letzte 7 Tage",
+    w_title: "Wetter & Außenfühler",
+    w_offset: "Fühler-Korrektur {k} K (aus {days} Tagen)",
+    w_offset_none: "Fühler-Korrektur: lernt noch",
+    w_spread: "ICON ↔ ECMWF nächste 24 h: ⌀ {mean} K, max {max} K",
+    w_sd: "σ Außentemperatur ⌀ {sd} K",
+    w_by_hour: "Fühler − Prognose je Tagesstunde",
+    w_explain:
+      "Die Modelle haben mit dem Außenfühler gelernt, deshalb wird die Prognose (Mittel aus ICON und ECMWF) auf den Fühler umgerechnet. Wo die beiden Wettermodelle auseinanderliegen, wächst das σ der Prognose – für Außentemperatur und Sonne je Fläche.",
     m_explain:
       "Modell: Das aktuelle Modell simuliert die Vergangenheit mit den gemessenen Eingängen (Neustart jede Mitternacht) – reiner Modellfehler. Prognose: worauf sich der Planer verlassen hat (Wetterprognose und geplante Blöcke).",
     s_measured: "gemessen",

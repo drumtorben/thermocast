@@ -90,7 +90,8 @@ def rollout(
     days = day_index or [0] * steps
 
     temps = {zi.name: zi.temp_now for zi in zones}
-    var = {zi.name: zi.var0 for zi in zones}
+    var = {zi.name: zi.var0 for zi in zones}  # model variance
+    wsd = {zi.name: zi.w0 for zi in zones}  # weather σ share (adds up linearly, see OnlineZoneModel.weather_std)
     hist = {zi.name: list(zi.model.history if zi.history is None else zi.history) for zi in zones}
     trajs = {zi.name: ZoneTrajectory(temp0=zi.temp_now) for zi in zones}
     on, since, switches = state.on, state.since_h, state.switches_today
@@ -106,7 +107,7 @@ def rollout(
             inputs = [
                 replace(
                     zi, temp_now=temps[zi.name], **window(zi, h, n),
-                    var0=var[zi.name], history=hist[zi.name], scale_offset=h,
+                    var0=var[zi.name], w0=wsd[zi.name], history=hist[zi.name], scale_offset=h,
                 )
                 for zi in zones
             ]
@@ -128,13 +129,14 @@ def rollout(
             cap = zi.cap_at(h)
             heats = on and (cap is None or temps[name] < cap)  # the thermostat closes at its cap
             rec = replace(zi.future[h], q=zi.q_on if heats else 0.0)
-            p = zi.model.predict(temps[name], [rec], var0=var[name], history=hist[name])
+            p = zi.model.predict(temps[name], [rec], var0=var[name], history=hist[name], w0=wsd[name])
             tr = trajs[name]
             tr.mean.append(p.mean[0])
             tr.std.append(p.std[0])
             tr.contrib.append(p.contrib[0])
             hist[name] = [*hist[name], replace(rec, temp=temps[name])][-max(zi.model.spec.max_lag, 1) :]
-            var[name] = p.std[0] ** 2
+            wsd[name] = p.weather[0]
+            var[name] = max(p.std[0] ** 2 - p.weather[0] ** 2, 0.0)
             temps[name] = p.mean[0]
         since += 1.0
 

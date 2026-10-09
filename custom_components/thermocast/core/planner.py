@@ -23,8 +23,9 @@ class ZonePlanInput:
     comfort_low: list[float | None]  # lower comfort bound per hour, None = don't care
     q_on: float = 10.0  # typical heating proxy while a block runs
     leads_release: bool = True
-    var0: float = 0.0  # variance of temp_now (rollout)
+    var0: float = 0.0  # model variance of temp_now (rollout)
     history: list[HourRecord] | None = None  # lag history override (rollout)
+    w0: float = 0.0  # weather σ share of temp_now (rollout)
     std_scale: tuple[float, ...] = ()  # calibrated σ factor per hour ahead of *now* (index 0 = 1 h)
     scale_offset: int = 0  # hours between now and future[0] (rollout re-plans)
     comfort_high: list[float | None] = field(default_factory=list)  # upper bound per hour, empty = none
@@ -33,7 +34,9 @@ class ZonePlanInput:
 
     def predict(self, records: list[HourRecord]) -> Prediction:
         # the planner only scores mean/σ – the cause split is computed where it is shown (rollout, hindcast)
-        pred = self.model.predict(self.temp_now, records, var0=self.var0, history=self.history, with_contrib=False)
+        pred = self.model.predict(
+            self.temp_now, records, var0=self.var0, history=self.history, with_contrib=False, w0=self.w0
+        )
         if self.std_scale:
             last = len(self.std_scale) - 1
             pred.std = [s * self.std_scale[min(self.scale_offset + i, last)] for i, s in enumerate(pred.std)]
@@ -64,7 +67,9 @@ class ZonePlanInput:
 
     def predict_batch(self, q: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """(mean, std) per heating schedule (rows of ``q``), σ calibrated like ``predict``."""
-        mean, std = self.model.predict_batch(self.temp_now, self.future, q, var0=self.var0, history=self.history)
+        mean, std = self.model.predict_batch(
+            self.temp_now, self.future, q, var0=self.var0, history=self.history, w0=self.w0
+        )
         if self.std_scale:
             last = len(self.std_scale) - 1
             std = std * np.array([self.std_scale[min(self.scale_offset + i, last)] for i in range(q.shape[1])])

@@ -57,8 +57,11 @@ def history(aioclient_mock: AiohttpClientMocker):
 
 
 async def test_new_zone_learns_from_history(hass: HomeAssistant, mock_entry: MockConfigEntry, history) -> None:
+    from custom_components.thermocast.core.weather import OutdoorBias
+
     sim, start, n = history
-    for sid, series in (("sensor.living", sim["air"]), ("sensor.kitchen", sim["air"]), ("sensor.outdoor", sim["t_out"])):
+    sensor = sim["t_out"] + 1.5  # the outdoor sensor reads warmer than the forecast
+    for sid, series in (("sensor.living", sim["air"]), ("sensor.kitchen", sim["air"]), ("sensor.outdoor", sensor)):
         rows = [{"start": start + timedelta(hours=i), "mean": float(series[i]), "min": float(series[i]),
                  "max": float(series[i])} for i in range(n)]
         async_import_statistics(hass, _meta(sid), rows)
@@ -73,10 +76,18 @@ async def test_new_zone_learns_from_history(hass: HomeAssistant, mock_entry: Moc
     assert len(zr.log) == 14 * 24 and zr.params
     types = [e["type"] for e in mock_entry.runtime_data.events.to_list()]
     assert "warmstart" in types
+    c = mock_entry.runtime_data
+    assert c.outdoor_bias.profile() == pytest.approx([1.5] * 24, abs=0.01)
+    assert c.forecast.t_out[-1] == pytest.approx(c.forecast.t_out_raw[-1] + 1.5, abs=0.01)
 
     # a trained zone is not re-learned on the next start, but the button re-learns on demand
     before = zr.model.n_updates
-    assert await mock_entry.runtime_data.async_warmstart(only_fresh=True) == {}
+    assert await c.async_warmstart(only_fresh=True) == {}
+    # an installation from before the sensor offset: trained zones, no offset yet -> learned at the next start
+    c.outdoor_bias = OutdoorBias()
+    assert await c.async_warmstart(only_fresh=True) == {}
+    assert c.outdoor_bias.profile() == pytest.approx([1.5] * 24, abs=0.01)
+    assert zr.model.n_updates == before
     button = er.async_get(hass).async_get_entity_id("button", DOMAIN, f"{mock_entry.entry_id}_warmstart")
     await hass.services.async_call("button", "press", {"entity_id": button}, blocking=True)
     await hass.async_block_till_done()

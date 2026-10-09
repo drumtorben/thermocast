@@ -8,6 +8,7 @@ from homeassistant.util import dt as dt_util
 from .const import CONF_GAIN_ENTITIES, CONF_HEAT_TYPE, CONF_LEADS_RELEASE, CONF_NEIGHBOR_SENSORS
 from .core.model import OnlineZoneModel
 from .core.quality import ForecastLog, QualityInput, zone_quality
+from .core.weather import weather_summary
 
 if TYPE_CHECKING:
     from .coordinator import ThermocastCoordinator, ZoneRuntime
@@ -42,7 +43,11 @@ async def async_model_view(coordinator: ThermocastCoordinator) -> dict[str, Any]
     for inp in [_quality_input(coordinator, sid, z) for sid, z in coordinator.zones.items()]:
         zones.append(await coordinator.hass.async_add_executor_job(zone_quality, inp, tz, now, QUALITY_DAYS))
     zones.sort(key=lambda zv: (not zv["leads"], zv["name"].lower()))
-    return {"version": MODEL_VERSION, "generated_at": now.isoformat(), "days": QUALITY_DAYS, "zones": zones}
+    weather = weather_summary(coordinator.outdoor_bias, coordinator.forecast, now, tz)
+    return {
+        "version": MODEL_VERSION, "generated_at": now.isoformat(), "days": QUALITY_DAYS, "zones": zones,
+        "weather": weather,
+    }
 
 
 async def async_export(coordinator: ThermocastCoordinator) -> dict[str, Any]:
@@ -65,6 +70,7 @@ async def async_export(coordinator: ThermocastCoordinator) -> dict[str, Any]:
             }
             for sid, z in coordinator.zones.items()
         },
+        "outdoor_bias": coordinator.outdoor_bias.to_dict(),
         "events": coordinator.events.to_list(),
         "control_since": coordinator.control_since.isoformat() if coordinator.control_since else None,
         "view": coordinator.view,

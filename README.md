@@ -63,6 +63,13 @@ sign projection (sun/heating/losses ≥ 0), Huber clipping against outliers, a c
 "wind-up" in summer. Hours with an open window or missing data are not learned. The planner uses
 `mean − z·σ`, so an uncertain model heats earlier.
 
+**Weather:** every Open-Meteo request asks two weather models – `best_match` (ICON of the DWD in Germany) and
+ECMWF IFS. The outdoor temperature is their mean, **moved onto your outdoor sensor**: a sensor on a wall reads
+warmer than the models' 2 m air temperature (often 1–2 K, more at noon), and the zone models learned with the
+sensor. The offset is learned per hour of day (about the last week; on setup from the recorder history). Where the
+two models disagree, the forecast σ grows – for the outdoor temperature and for the sun on each surface (through
+the learned coefficients, adding up over the hours). The tab *Model* shows the offset and the disagreement.
+
 **Why not reinforcement learning?** A house yields a few hundred decisions per season; RL would need orders of
 magnitude more and would have to "explore" (= be cold). Model-based control with online identification is
 the data-efficient, safe option.
@@ -176,7 +183,7 @@ changes the release. Panel texts: English and German.
 ## Learning, calibration, diagnostics
 
 * **Warm start:** new zones learn from the last **30 days** of recorder statistics (+ past irradiance from Open-Meteo).
-  The button *"Re-learn models from history"* does that for all zones.
+  The button *"Re-learn models from history"* does that for all zones (and re-learns the outdoor sensor offset).
 * **σ calibration** (option, on by default): forecast errors of the last 14 days widen the planner's uncertainty per
   horizon (never narrow it).
 * **Comfort schedule:** per zone optionally a `schedule.*` helper, e.g. office on weekdays 8–17.

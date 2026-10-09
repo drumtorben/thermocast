@@ -102,6 +102,41 @@ class TcModel extends LitElement {
     </div>`;
   }
 
+  // outdoor sensor offset per local hour (bars around a zero line) and the weather models' disagreement
+  _weather(w) {
+    const L = this.lang;
+    if (!w) return nothing;
+    const prof = w.offset_by_hour;
+    const max = Math.max(0.5, ...(prof || []).map((v) => Math.abs(v ?? 0)));
+    const bw = 11;
+    const mid = 30;
+    const bars = prof
+      ? html`<svg width=${24 * bw + 4} height="76">
+          <line x1="2" x2=${24 * bw + 2} y1=${mid} y2=${mid} stroke="var(--divider-color, #ccc)"></line>
+          ${prof.map((v, h) => {
+            const hgt = (Math.abs(v ?? 0) / max) * 26;
+            return svg`<rect x=${h * bw + 3} y=${(v ?? 0) >= 0 ? mid - hgt : mid} width=${bw - 3} height=${hgt}
+                fill="#0072B2" opacity="0.8"><title>${h}:00 · ${fmtSigned(v, L, 1)} K</title></rect>
+              ${h % 6 === 0 ? svg`<text x=${h * bw + 3} y="72">${h}:00</text>` : nothing}`;
+          })}
+        </svg>`
+      : nothing;
+    return html`<div class="card">
+      <div class="head">
+        <b>${t(L, "w_title")}</b>
+        ${w.offset_mean !== null
+          ? html`<span class="chip">${t(L, "w_offset", { k: fmtSigned(w.offset_mean, L, 1), days: fmtNum(w.days, L, 0) })}</span>`
+          : html`<span class="chip">${t(L, "w_offset_none")}</span>`}
+        ${w.spread_mean !== null
+          ? html`<span class="chip">${t(L, "w_spread", { mean: fmtNum(w.spread_mean, L, 1), max: fmtNum(w.spread_max, L, 1) })}</span>`
+          : nothing}
+        ${w.sd_mean !== null ? html`<span class="chip">${t(L, "w_sd", { sd: fmtNum(w.sd_mean, L, 1) })}</span>` : nothing}
+      </div>
+      ${prof ? html`<div class="sub">${t(L, "w_by_hour")}</div>${bars}` : nothing}
+      <div class="muted small">${t(L, "w_explain")}</div>
+    </div>`;
+  }
+
   _zone(z) {
     const L = this.lang;
     const m = z.metrics;
@@ -189,7 +224,9 @@ class TcModel extends LitElement {
         <button @click=${() => this._export()} ?disabled=${this._exporting}>${t(L, this._exporting ? "exporting" : "export")}</button>
       </div>
       ${this._error ? html`<p class="card">${t(L, "error")}: ${this._error}</p>` : nothing}
-      ${this._data ? this._data.zones.map((z) => this._zone(z)) : html`<p class="card">${t(L, "loading")}</p>`}
+      ${this._data
+        ? html`${this._weather(this._data.weather)}${this._data.zones.map((z) => this._zone(z))}`
+        : html`<p class="card">${t(L, "loading")}</p>`}
     `;
   }
 

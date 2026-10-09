@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 from typing import Self
 
 import pytest
@@ -64,6 +65,30 @@ def test_a_busy_open_meteo_is_retried(monkeypatch: pytest.MonkeyPatch) -> None:
     assert waits == list(forecast.RETRY_DELAYS)  # waited, then the third try went through
     assert fc.t_out == [12.0, 13.0] and fc.irr["90_90"] == [100.0, 200.0] and set(fc.irr) == {"0_0", "90_90", "45_180"}
     assert session.calls == 2 + 3  # two refusals, then temperature + two orientations
+
+
+class _TwoModels(_Session):
+    """Open-Meteo's answer for ``models=best_match,ecmwf_ifs025``: every series twice, suffixed by the model."""
+
+    def get(self, url: str, params: dict, timeout: int):
+        assert params["models"] == f"{forecast.MAIN_MODEL},{forecast.ALT_MODEL}"
+        hourly = {"time": ["2026-10-08T10:00", "2026-10-08T11:00"]}
+        if "tilt" in params:
+            hourly |= {"global_tilted_irradiance_best_match": [100.0, 200.0],
+                       "global_tilted_irradiance_ecmwf_ifs025": [300.0, None]}
+        else:
+            hourly |= {"temperature_2m_best_match": [12.0, 13.0], "temperature_2m_ecmwf_ifs025": [11.0, None],
+                       "shortwave_radiation_best_match": [50.0, 60.0], "shortwave_radiation_ecmwf_ifs025": [0.0, 0.0]}
+        return _Resp(200, {"hourly": hourly})
+
+
+def test_two_models_mean_temperature_and_spread() -> None:
+    fc = _fetch(_TwoModels())
+    assert fc.t_out == [11.5, 13.0] and fc.t_out_raw == [11.5, 13.0]  # an hour without ECMWF: ICON alone
+    assert fc.t_out_spread[0] == 1.0 and math.isnan(fc.t_out_spread[1])
+    assert fc.irr["90_90"] == [100.0, 200.0]  # the irradiance the models learned with stays best_match
+    assert fc.irr_spread["90_90"][0] == 200.0 and math.isnan(fc.irr_spread["90_90"][1])
+    assert "0_0" not in fc.irr_spread
 
 
 def test_still_busy_after_the_retries_raises(monkeypatch: pytest.MonkeyPatch) -> None:

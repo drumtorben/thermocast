@@ -77,6 +77,7 @@ from .core.planner import PlanResult, ZonePlanInput, charge_cost, plan
 from .core.quality import ForecastLog, RingLog, calibration, measured_by_hour, param_snapshot, std_scale_profile
 from .core.rollout import block_lengths_for
 from .core.rules import binary_value, hvac_heating, trim_tail_restart, window_recovering, window_recovery_temp
+from .core.weather import OutdoorBias
 from .events import EventLog
 from .view_builder import ViewBuilder
 from .zone_actuator import ZoneActuator
@@ -322,7 +323,8 @@ def build_plan_inputs(
         gains = tuple(_or(_num(hass, e), 0.0) for e in z.cfg.get(CONF_GAIN_ENTITIES, []))
         future = [
             HourRecord(
-                temp=temp, t_out=fc.t_out[idx0 + h], irr=fc.irr_at(idx0 + h), q=0.0, neighbors=neighbors, gains=gains
+                temp=temp, t_out=fc.t_out[idx0 + h], irr=fc.irr_at(idx0 + h), q=0.0, neighbors=neighbors, gains=gains,
+                t_out_sd=fc.t_out_sd(idx0 + h), irr_sd=fc.irr_sd_at(idx0 + h),
             )
             for h in range(horizon)
         ]
@@ -363,6 +365,9 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
         self.events = EventLog()
         self.zone_actuator = ZoneActuator(hass, self.events)
         self.forecast: Forecast | None = None
+        self.outdoor_bias = OutdoorBias()  # forecast -> outdoor sensor, learned per hour of day
+        self._outdoor_hour: datetime | None = None  # running hour of the outdoor sensor samples
+        self._outdoor_acc: list[float] = []
         self.control_enabled = False  # observe mode by default
         self.house_device_id: str | None = None  # set in async_setup_entry
         self._failsafe_active = False
@@ -421,6 +426,11 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
             self.zones[subentry.subentry_id] = zr
         cs = stored.get("control_since")
         self.control_since = datetime.fromisoformat(cs) if cs else None
+        outdoor = stored.get("outdoor") or {}
+        self.outdoor_bias = OutdoorBias.from_dict(outdoor.get("bias"))
+        if outdoor.get("hour"):
+            self._outdoor_hour = datetime.fromisoformat(outdoor["hour"])
+            self._outdoor_acc = [float(v) for v in outdoor.get("acc", []) if v is not None]
         # a new or reset zone would plan with its prior until the warm start (setup runs it in the background)
         self.warmstart_pending = any(z.model.n_updates == 0 for z in self.zones.values())
         # _ensure_forecast still checks its age and whether it covers every surface
@@ -478,6 +488,11 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
             "bt": self.zone_actuator.to_dict(),
             "events": self.events.to_list(),
             "control_since": self.control_since.isoformat() if self.control_since else None,
+            "outdoor": {
+                "bias": self.outdoor_bias.to_dict(),
+                "hour": self._outdoor_hour.isoformat() if self._outdoor_hour else None,
+                "acc": self._outdoor_acc,
+            },
             "zones": {
                 sid: {
                     "model": z.model.to_dict(),
@@ -568,6 +583,7 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
             return {}
         self._warmstart_running = True
         result: dict[str, int] = {}
+        bias = self.outdoor_bias
         try:
             result = await async_warmstart(self, only_fresh)
         except Exception:
@@ -575,9 +591,9 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
         finally:
             self._warmstart_running = False
             held, self.warmstart_pending = self.warmstart_pending, False
-        if any(result.values()):
+        if any(result.values()) or self.outdoor_bias is not bias:
             await self.async_save()
-        if any(result.values()) or held:
+        if any(result.values()) or held or self.outdoor_bias is not bias:
             # plan with the learned model (and end the hold) – directly: a debounced request would delay
             # the next requested refresh (e.g. switching control on right after the setup)
             await self.async_refresh()
@@ -655,6 +671,9 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
         await self._ensure_schedules(hour)
 
         t_out = _num(hass, data.get(CONF_OUTDOOR_SENSOR))
+        self._track_outdoor(hour, t_out)
+        if self.forecast:  # the models learned with the sensor: the forecast speaks its language
+            self.forecast.correct(self.outdoor_bias.offset_fn())
         if t_out is None and self.forecast:
             idx = self.forecast.index_of(now)
             t_out = self.forecast.t_out[idx] if idx is not None else None
@@ -764,6 +783,20 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
         if last_start <= self._started + timedelta(minutes=1):  # restored at startup, not a real start
             return False
         return trim_tail_restart(now, block_end, last_start, lock, UPDATE_INTERVAL)
+
+    def _track_outdoor(self, hour: datetime, value: float | None) -> None:
+        """Collect the outdoor sensor per hour; a closed hour is one more sample of its offset to the forecast."""
+        if self._outdoor_hour is not None and hour > self._outdoor_hour:
+            fc = self.forecast
+            idx = fc.index_of(self._outdoor_hour) if fc else None
+            if fc and idx is not None and self._outdoor_acc:
+                raw = fc.t_out_raw or fc.t_out
+                self.outdoor_bias.update(self._outdoor_hour, fmean(self._outdoor_acc), raw[idx])
+            self._outdoor_acc = []
+        if self._outdoor_hour is None or hour > self._outdoor_hour:
+            self._outdoor_hour = hour
+        if value is not None:
+            self._outdoor_acc.append(value)
 
     def _close_hour(self, z: ZoneRuntime, temp_now: float, now: datetime, consecutive: bool) -> None:
         acc = z.acc

@@ -31,6 +31,7 @@ from .core.rules import binary_value, hvac_heating
 from .core.series import hourly_fraction, hourly_mean, mask_off
 from .core.view import align
 from .core.warmstart import WarmstartInputs, build_records, warm_train
+from .core.weather import OutdoorBias
 from .history import async_fetch_attribute, async_fetch_states, async_fetch_statistics
 
 if TYPE_CHECKING:
@@ -51,9 +52,11 @@ async def async_warmstart(coordinator: ThermocastCoordinator, only_fresh: bool) 
     if "recorder" not in hass.config.components:
         return {}
     targets = {sid: z for sid, z in coordinator.zones.items() if not only_fresh or z.model.n_updates == 0}
-    if not targets:
-        return {}
     cfg = coordinator.config_entry.data
+    # the outdoor sensor offset is learned from the same history (on a manual warm start again)
+    learn_bias = bool(cfg.get(CONF_OUTDOOR_SENSOR)) and (not only_fresh or coordinator.outdoor_bias.empty)
+    if not targets and not learn_bias:
+        return {}
     tz = dt_util.get_time_zone(hass.config.time_zone)
     end = dt_util.utcnow().replace(minute=0, second=0, microsecond=0)
     start = end - timedelta(days=WARMSTART_DAYS)
@@ -106,8 +109,15 @@ async def async_warmstart(coordinator: ThermocastCoordinator, only_fresh: bool) 
         fc = None
     t_out = numeric(cfg.get(CONF_OUTDOOR_SENSOR))
     if fc is not None:
-        t_fc = align(fc.times, fc.t_out, hours)
-        t_out = [m if m is not None else f for m, f in zip(t_out, t_fc)]
+        t_fc = align(fc.times, fc.t_out_raw or fc.t_out, hours)
+        if learn_bias:
+            bias = OutdoorBias()
+            n = bias.learn(hours, t_out, t_fc)
+            if n >= MIN_LEARNED_HOURS:
+                coordinator.outdoor_bias = bias
+                _LOGGER.info("Thermocast warm start: outdoor sensor offset learned from %s hours", n)
+        offset = coordinator.outdoor_bias.offset_fn()  # a gap in the sensor is filled in the sensor's language
+        t_out = [m if m is not None else (f + offset(h) if f is not None else None) for h, m, f in zip(hours, t_out, t_fc)]
     flow = numeric(cfg.get(CONF_FLOW_TEMP_SENSOR))
     heating = None
     if cfg.get(CONF_HEATING_ACTIVE):
