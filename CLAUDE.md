@@ -204,7 +204,7 @@ Attr. Parameter + Sonnenantwort je Fläche).
 
 ---
 
-## 4. Status (v0.8.2)
+## 4. Status (v0.8.3)
 
 - ✅ Kern getestet auf synthetischen Daten: 1-Schritt-MAE ≈ 0,03 K/h, 24-h-Prognose-MAE ≈ 0,1 K,
   Ostfenster und Süddach werden getrennt gelernt, Planer heizt bei −5 °C, nicht bei 18 °C.
@@ -271,6 +271,7 @@ Attr. Parameter + Sonnenantwort je Fläche).
   (Tab „Modell“: Karte „Wetter & Außenfühler“); v0.8.1: Setup startet den Warmstart auch, wenn nur der Fühler-Offset
   fehlt (vorher nur bei neuen Zonen → bestehende Anlagen blieben unkorrigiert);
   v0.8.2: kurze Pausen überbrücken (nächster Block vor Ende der Mindestpause → an lassen), Panel nennt „bis wann“.
+  v0.8.3: Heiz-Proxy zeitgewichtet per State-Change (taktender Brenner: 4 Stichproben/h lagen bis +75 % daneben).
   Erkenntnis an der Anlage: an milden Tagen liefert die witterungsgeführte Kurve kaum Vorlauf → Fußpunkt anheben
   (README); längere Fenster-Verzögerungen (0–3 h) getestet und verworfen (MAE minimal schlechter).
 - Bekannte Schwächen:
