@@ -117,6 +117,13 @@ T[t+1] − T[t] = b0 + a·(T_out − T)
   (WZ 3,2 statt ~15 in Blöcken) und der Planer unterschätzte Blöcke um Faktor 4–5.
 - RLS: Vergessensfaktor 0,996/h (~10 Tage), Vorzeichen-Projektion (alles außer Bias ≥ 0),
   Huber-Clipping (3σ), Kovarianz-Deckel (normierte Spur ≤ 50) gegen Wind-up im Sommer.
+- **Gewinne normiert** (v0.8.4): Modell sieht `G / gain_scale` (größter bisher gesehener |G|, ≥ 1; wächst die Skala,
+  wird θ mitskaliert → Prognose unverändert, Varianz höchstens auf den Prior `GAIN_PRIOR_VAR` 0,1). `params()` und
+  Tab „Modell“ zeigen weiter „K/h pro Einheit“. Anlass: Leistungssensor (W) mit Prior 1e-3, 14 Tage 0 W → Varianz
+  aufgezogen, die erste Stunde mit 154 W gab dem Gewinn den ganzen Fehler (0,0147 K/h/W → Prognose 120 °C). Gespeicherte
+  Modelle ohne `gain_scale` setzen die Gewinn-Parameter beim Laden zurück (Tests: `tests/test_gains.py`).
+- **Gewinn-Prognose** (`gain_path`): aktueller Wert klingt (τ 3 h) zum typischen Wert der Tagesstunde ab
+  (`typical_gains` aus dem 14-Tage-Stunden-Log; fehlende Stunde → Gesamtmittel; ohne Log konstant wie früher).
   Stunden mit offenem Fenster/Datenlücke: nicht lernen, nur Historie fortschreiben.
 - Prognose liefert Mittelwert + σ; Planer nutzt `mean − z·σ` (z = Option, Standard 1).
 - **Wetter (v0.8.0):** T_out der Prognose = Mittel ICON (best_match) + ECMWF IFS **+ Fühler-Offset** (`OutdoorBias`,
@@ -204,7 +211,7 @@ Attr. Parameter + Sonnenantwort je Fläche).
 
 ---
 
-## 4. Status (v0.8.3)
+## 4. Status (v0.8.4)
 
 - ✅ Kern getestet auf synthetischen Daten: 1-Schritt-MAE ≈ 0,03 K/h, 24-h-Prognose-MAE ≈ 0,1 K,
   Ostfenster und Süddach werden getrennt gelernt, Planer heizt bei −5 °C, nicht bei 18 °C.
@@ -272,10 +279,14 @@ Attr. Parameter + Sonnenantwort je Fläche).
   fehlt (vorher nur bei neuen Zonen → bestehende Anlagen blieben unkorrigiert);
   v0.8.2: kurze Pausen überbrücken (nächster Block vor Ende der Mindestpause → an lassen), Panel nennt „bis wann“.
   v0.8.3: Heiz-Proxy zeitgewichtet per State-Change (taktender Brenner: 4 Stichproben/h lagen bis +75 % daneben).
+  v0.8.4: innere Gewinne normiert gelernt (W-Sensor ließ eine Zonen-Prognose auf 120 °C laufen), Gewinn-Prognose
+  klingt zum Tagesprofil ab; echtes Zonen-Log nachgespielt: 0,00017 K/h/W statt 0,0147, konstant 300 W → max. +1,1 K.
   Erkenntnis an der Anlage: an milden Tagen liefert die witterungsgeführte Kurve kaum Vorlauf → Fußpunkt anheben
   (README); längere Fenster-Verzögerungen (0–3 h) getestet und verworfen (MAE minimal schlechter).
 - Bekannte Schwächen:
-  - Prognose nutzt aktuelle Nachbartemperaturen/Gains als konstant über den Horizont.
+  - Prognose nutzt aktuelle Nachbartemperaturen als konstant über den Horizont (Gewinne: Tagesprofil, s. o.).
+  - Ein Gerät, das kühlt (z. B. Klimagerät im Sommer), meldet als Leistungssensor positive Watt – Gewinne sind ≥ 0;
+    dafür einen Template-Sensor nutzen, der nur im heizenden/entfeuchtenden Modus die Leistung meldet.
   - Planer kennt nur *einen* Block im Horizont (Rollout plant stündlich neu; die Zehrzeit bewertet den nächsten Start).
   - Im Block taktet der Brenner weiter, wenn das Haus < Mindestleistung abnimmt (→ Stufe 2, „Starts je Block“).
   - Warmstart nutzt Stundenmittel (leicht geglättete ΔT) und für den Heiz-Proxy den Stundenmittel-Vorlauf
@@ -295,9 +306,8 @@ Attr. Parameter + Sonnenantwort je Fläche).
 4. Anwesenheit (`zone.home`) im Komfort.
 5. Nachbartemperaturen über den Horizont prognostizieren statt konstant.
 6. Wärmepumpen-Kostenfunktion (EPEX, PV, COP) vorbereiten.
-7. Gewinn-Prognose nach Tagesprofil (typischer Wert je Stunde, evtl. je Wochentag, aus dem Stunden-Log) statt
-   konstant fortgeschrieben – erst danach ein Hausstrom-Signal (Gesamtleistung) als innerer Gewinn sinnvoll
-   (sonst schreibt der Planer z. B. eine Ofen-Spitze für 72 h fort).
+7. ~~Gewinn-Prognose nach Tagesprofil~~ ✅ v0.8.4 (je Tagesstunde; offen: je Wochentag) – damit ist ein
+   Hausstrom-Signal (Gesamtleistung) als innerer Gewinn jetzt möglich.
 
 ---
 

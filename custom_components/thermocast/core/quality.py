@@ -254,7 +254,10 @@ def std_scale_profile(factors: dict[int, float], length: int = 48) -> tuple[floa
 # ------------------------------------------------------------- interpretation
 def _param_std(model: OnlineZoneModel) -> dict[str, float]:
     sigma = math.sqrt(model.resid_var)
-    return {n: math.sqrt(max(float(model.P[i, i]), 0.0)) * sigma for i, n in enumerate(model.names)}
+    div = model.unit_divisors()  # per unit of the input, like ``params()``
+    return {
+        n: math.sqrt(max(float(model.P[i, i]), 0.0)) * sigma / float(div[i]) for i, n in enumerate(model.names)
+    }
 
 
 def param_snapshot(model: OnlineZoneModel) -> dict[str, dict[str, float]]:

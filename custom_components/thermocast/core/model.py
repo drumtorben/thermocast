@@ -15,6 +15,7 @@ forgetting factor, projected to physically sensible signs.
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -32,6 +33,12 @@ HEAT_LAGS: dict[str, tuple[int, ...]] = {
     "fbh": (0, 1, 2, 3, 4, 6),
     "radiator": (0, 1),
 }
+
+# Gains come in any unit (W, persons, 0/1). The model sees them divided by the largest value seen so far (0…1),
+# so the prior and one hour's update mean the same for a 300 W device as for a 0/1 switch. Prior σ ~0.3 K/h at
+# full load (like the heating: proxy ~10 K at prior 1e-3).
+GAIN_PRIOR_VAR = 0.1
+GAIN_DECAY_H = 3.0  # forecast: the current gain fades into the typical value of the hour of day
 
 
 @dataclass(frozen=True)
@@ -150,6 +157,46 @@ def update_q_on(q_on: float | None, q: float, pump_share: float | None) -> float
     return b if q_on is None else (1.0 - Q_ON_ALPHA) * q_on + Q_ON_ALPHA * b
 
 
+def typical_gains(samples: Iterable[tuple[int, Sequence[float]]], n: int) -> dict[int, tuple[float, ...]]:
+    """Mean gains per local hour of day from (hour, gains) samples, e.g. the hour log.
+
+    Hours without a sample get the mean over all samples; samples of another length (the gains were
+    reconfigured) are skipped. No samples -> {}.
+    """
+    sums: dict[int, list[float]] = {}
+    counts: dict[int, int] = {}
+    for hour, gains in samples:
+        if len(gains) != n or not all(isinstance(g, int | float) and math.isfinite(g) for g in gains):
+            continue
+        acc = sums.setdefault(hour, [0.0] * n)
+        for i, g in enumerate(gains):
+            acc[i] += g
+        counts[hour] = counts.get(hour, 0) + 1
+    if not counts:
+        return {}
+    total = sum(counts.values())
+    overall = tuple(sum(s[i] for s in sums.values()) / total for i in range(n))
+    return {
+        h: tuple(v / counts[h] for v in sums[h]) if h in counts else overall for h in range(24)
+    }
+
+
+def gain_path(
+    current: tuple[float, ...], typical: dict[int, tuple[float, ...]], hours: Sequence[int], tau: float = GAIN_DECAY_H
+) -> list[tuple[float, ...]]:
+    """Forecast gains per hour (``hours``: local hour of day of each forecast hour): the current value fades
+    into the typical value of that hour (time constant ``tau``). A device that runs now runs on for a few
+    hours, not for the whole horizon. Without a profile the current value stays (as before)."""
+    if not typical or not current:
+        return [current] * len(hours)
+    out: list[tuple[float, ...]] = []
+    for h, hour in enumerate(hours):
+        w = math.exp(-h / tau)
+        typ = typical.get(hour, current)
+        out.append(tuple(w * c + (1.0 - w) * t for c, t in zip(current, typ)))
+    return out
+
+
 @dataclass
 class Prediction:
     mean: list[float]
@@ -189,6 +236,7 @@ class OnlineZoneModel:
         self._build_layout()
         self.theta = self._prior()
         self.P = np.diag(self._prior_scale()) * p0
+        self.gain_scale = np.ones(self.spec.n_gains)  # largest |gain| seen so far (≥ 1), see GAIN_PRIOR_VAR
         self.history: list[HourRecord] = []
         self.n_updates = 0
         self.resid_var = 0.05**2  # (K/h)²
@@ -217,6 +265,7 @@ class OnlineZoneModel:
             (key, lag, 2 + i) for i, (key, lag) in enumerate((s.key, lag) for s in self.spec.surfaces for lag in s.lags)
         ]
         self._neighbor_cols = [i for i, n in enumerate(names) if n.startswith("neighbor:")]
+        self._gain_cols = [i for i, n in enumerate(names) if n.startswith("gain:")]
         self.nonneg = np.array(nonneg)
         self.dim = len(names)
         self.groups = [_group_of(n) for n in names]
@@ -245,9 +294,48 @@ class OnlineZoneModel:
                 scale[i] = 1e-3
             elif name.startswith("solar"):
                 scale[i] = 1e-7
-            elif name.startswith(("heat", "neighbor", "gain")):
+            elif name.startswith(("heat", "neighbor")):
                 scale[i] = 1e-3
+            elif name.startswith("gain"):
+                scale[i] = GAIN_PRIOR_VAR
         return scale
+
+    def _grow_gain_scale(self, gains: Sequence[float]) -> None:
+        """Raise the scale of gains above their largest value so far, keeping the predictions unchanged.
+
+        The parameter grows with the scale; its variance too, but at most to the prior – a never-excited
+        gain (always 0 W) has a wound-up variance that would otherwise give the first hour all the error.
+        """
+        prior = self._prior_scale()
+        for i, col in enumerate(self._gain_cols):
+            g = abs(gains[i]) if i < len(gains) and math.isfinite(gains[i]) else 0.0
+            old = float(self.gain_scale[i])
+            if g <= old:
+                continue
+            r = g / old
+            self.theta[col] *= r
+            p = float(self.P[col, col])
+            f = r if p * r * r <= prior[col] else math.sqrt(prior[col] / p)
+            self.P[col, :] *= f
+            self.P[:, col] *= f
+            self.gain_scale[i] = g
+
+    def _reset_gains(self) -> None:
+        """Gain parameters back to the prior (no correlation with the rest)."""
+        prior, prior_theta = self._prior_scale(), self._prior()
+        for col in self._gain_cols:
+            self.theta[col] = prior_theta[col]
+            self.P[col, :] = 0.0
+            self.P[:, col] = 0.0
+            self.P[col, col] = prior[col]
+        self.gain_scale = np.ones(self.spec.n_gains)
+
+    def unit_divisors(self) -> np.ndarray:
+        """Per parameter: learned value / divisor = value per unit of the input (gains are learned normalised)."""
+        d = np.ones(self.dim)
+        for i, col in enumerate(self._gain_cols):
+            d[col] = self.gain_scale[i]
+        return d
 
     # ---------------------------------------------------------------- features
     def features(self, rec: HourRecord, history: list[HourRecord]) -> np.ndarray:
@@ -270,7 +358,7 @@ class OnlineZoneModel:
             n = rec.neighbors[i] if i < len(rec.neighbors) else rec.temp
             phi.append(n - rec.temp)
         for i in range(self.spec.n_gains):
-            phi.append(rec.gains[i] if i < len(rec.gains) else 0.0)
+            phi.append(rec.gains[i] / self.gain_scale[i] if i < len(rec.gains) else 0.0)
         return np.asarray(phi, dtype=float)
 
     # ------------------------------------------------------------------ update
@@ -280,6 +368,7 @@ class OnlineZoneModel:
             self._push(rec)
             return None
 
+        self._grow_gain_scale(rec.gains)
         phi = self.features(rec, self.history)
         y = temp_next - rec.temp
         err = y - float(phi @ self.theta)
@@ -455,7 +544,7 @@ class OnlineZoneModel:
                     temp_cols[t].append(col)
                 col += 1
             for i in range(self.spec.n_gains):
-                const[t, col] = rec.gains[i] if i < len(rec.gains) else 0.0
+                const[t, col] = rec.gains[i] / self.gain_scale[i] if i < len(rec.gains) else 0.0
                 col += 1
 
         means = np.empty((n_s, horizon))
@@ -478,7 +567,8 @@ class OnlineZoneModel:
 
     # -------------------------------------------------------------- inspection
     def params(self) -> dict[str, float]:
-        return {n: float(v) for n, v in zip(self.names, self.theta)}
+        """Parameters per unit of their input (a gain in K/h per W, not per its normalised value)."""
+        return {n: float(v) for n, v in zip(self.names, self.theta / self.unit_divisors())}
 
     def solar_response(self) -> dict[str, float]:
         """Summed solar coefficient per surface (K/h per kW/m²) – for diagnostics."""
@@ -507,6 +597,7 @@ class OnlineZoneModel:
             "n_updates": self.n_updates,
             "resid_var": self.resid_var,
             "mae": self.mae,
+            "gain_scale": self.gain_scale.tolist(),
         }
 
     def load_dict(self, data: dict[str, Any]) -> bool:
@@ -515,6 +606,10 @@ class OnlineZoneModel:
             return False
         self.theta = np.asarray(data["theta"], dtype=float)
         self.P = np.asarray(data["P"], dtype=float)
+        if "gain_scale" in data and len(data["gain_scale"]) == self.spec.n_gains:
+            self.gain_scale = np.asarray(data["gain_scale"], dtype=float)
+        else:  # stored before gains were normalised (≤ v0.8.3): raw-unit parameters, one hour could ruin them
+            self._reset_gains()
         self.history = [HourRecord.from_dict(h) for h in data.get("history", [])]
         self.n_updates = int(data.get("n_updates", 0))
         self.resid_var = float(data.get("resid_var", self.resid_var))

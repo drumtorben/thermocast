@@ -31,10 +31,13 @@ def surface_irradiance(el: float, az: float, tilt_deg: float, az_deg: float, clo
     return max(0.0, dni * cos_inc) + dhi * (1 + math.cos(tilt)) / 2
 
 
-def simulate(days: int = 40, seed: int = 0, heat_schedule=None, roof_delay_h: float = 2.0):
+def simulate(
+    days: int = 40, seed: int = 0, heat_schedule=None, roof_delay_h: float = 2.0, gain_w=None, gain_coef: float = 3e-4
+):
     """Return hourly arrays for a bedroom-like zone with an east window and south roof.
 
-    True dynamics (unknown to the learner): air node + screed node.
+    True dynamics (unknown to the learner): air node + screed node. ``gain_w`` (hour -> W, e.g. a dehumidifier)
+    adds an internal gain of ``gain_coef`` K/h per W to the air.
     """
     rng = np.random.default_rng(seed)
     n = days * 24
@@ -53,6 +56,7 @@ def simulate(days: int = 40, seed: int = 0, heat_schedule=None, roof_delay_h: fl
     screed = np.empty(n + 1)
     air[0], screed[0] = 20.5, 22.0
     q = np.zeros(n)
+    gain = np.array([float(gain_w(i)) for i in range(n)]) if gain_w is not None else np.zeros(n)
     roof_heat = 0.0
     for i in range(n):
         if heat_schedule is not None:
@@ -68,6 +72,7 @@ def simulate(days: int = 40, seed: int = 0, heat_schedule=None, roof_delay_h: fl
             + 0.10 * (screed[i] - air[i])
             + 4e-4 * irr_e[i]
             + 3e-4 * roof_heat
+            + gain_coef * gain[i]
             + rng.normal(0, 0.02)
         )
         screed[i + 1] = screed[i] + d_screed
@@ -76,5 +81,6 @@ def simulate(days: int = 40, seed: int = 0, heat_schedule=None, roof_delay_h: fl
         "t_out": t_out,
         "air": air,
         "q": q,
+        "gain": gain,
         "irr": {"90_90": irr_e, "40_180": irr_s_roof},
     }

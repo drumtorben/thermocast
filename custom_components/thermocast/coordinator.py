@@ -73,7 +73,7 @@ from .const import (
     UPDATE_INTERVAL,
 )
 from .core.forecast import Forecast, fetch_forecast
-from .core.model import HourRecord, OnlineZoneModel, SurfaceSpec, ZoneSpec, update_q_on
+from .core.model import HourRecord, OnlineZoneModel, SurfaceSpec, ZoneSpec, gain_path, typical_gains, update_q_on
 from .core.planner import PlanResult, ZonePlanInput, charge_cost, plan
 from .core.quality import ForecastLog, RingLog, calibration, measured_by_hour, param_snapshot, std_scale_profile
 from .core.rollout import block_lengths_for
@@ -341,6 +341,17 @@ def zone_airing(hass: HomeAssistant, z: ZoneRuntime, now: datetime) -> bool:
     return zone_window_open(hass, z) or window_recovering(z.window_closed, now)
 
 
+def zone_typical_gains(z: ZoneRuntime) -> dict[int, tuple[float, ...]]:
+    """Mean gains per local hour of day from the zone's hour log (14 days)."""
+    n = len(z.cfg.get(CONF_GAIN_ENTITIES, []))
+    if not n:
+        return {}
+    return typical_gains(
+        ((dt_util.as_local(datetime.fromisoformat(e["t"])).hour, e["rec"].get("gains", ())) for e in z.log.to_list()),
+        n,
+    )
+
+
 def build_plan_inputs(
     hass: HomeAssistant, zones: dict[str, ZoneRuntime], fc: Forecast, idx0: int, horizon: int
 ) -> list[ZonePlanInput]:
@@ -360,16 +371,20 @@ def build_plan_inputs(
         neighbors = tuple(
             (v if (v := _num(hass, e)) is not None else temp) for e in z.cfg.get(CONF_NEIGHBOR_SENSORS, [])
         )
-        gains = tuple(_or(_num(hass, e), 0.0) for e in z.cfg.get(CONF_GAIN_ENTITIES, []))
+        ends = [fc.times[idx0 + 1 + h] for h in range(horizon)]  # prediction h = end of hour h
+        starts = [fc.times[idx0 + h] for h in range(horizon)]  # heat input of hour h
+        gains = gain_path(
+            tuple(_or(_num(hass, e), 0.0) for e in z.cfg.get(CONF_GAIN_ENTITIES, [])),
+            zone_typical_gains(z),
+            [dt_util.as_local(t).hour for t in starts],
+        )
         future = [
             HourRecord(
-                temp=temp, t_out=fc.t_out[idx0 + h], irr=fc.irr_at(idx0 + h), q=0.0, neighbors=neighbors, gains=gains,
-                t_out_sd=fc.t_out_sd(idx0 + h), irr_sd=fc.irr_sd_at(idx0 + h),
+                temp=temp, t_out=fc.t_out[idx0 + h], irr=fc.irr_at(idx0 + h), q=0.0, neighbors=neighbors,
+                gains=gains[h], t_out_sd=fc.t_out_sd(idx0 + h), irr_sd=fc.irr_sd_at(idx0 + h),
             )
             for h in range(horizon)
         ]
-        ends = [fc.times[idx0 + 1 + h] for h in range(horizon)]  # prediction h = end of hour h
-        starts = [fc.times[idx0 + h] for h in range(horizon)]  # heat input of hour h
         high = zone_high(z)
         # an open window: the room cools by airing, not for lack of heat – it neither calls for a block nor
         # takes heat (its thermostat holds the base); after closing, it plans from the temperature before

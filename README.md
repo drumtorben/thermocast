@@ -56,12 +56,14 @@ every 15 min:  read sensors ──► hour finished? ──► RLS update per zo
 | `Q` underfloor | heating proxy (flow − room while the heating pump runs) | 0–6 h (screed) |
 | `Q` radiator | proxy × valve share (thermostat `hvac_action`) | 0–1 h |
 | `T_n` | neighbouring rooms | – |
-| `G_g` | internal gains (power sensors, presence) | – |
+| `G_g` | internal gains (power sensors, presence), learned relative to their largest value so far | – |
 
 **Online learning:** recursive least squares with a forgetting factor (default 0.996/h ≈ 10 days of memory),
 sign projection (sun/heating/losses ≥ 0), Huber clipping against outliers, a covariance cap against
 "wind-up" in summer. Hours with an open window or missing data are not learned. The planner uses
-`mean − z·σ`, so an uncertain model heats earlier.
+`mean − z·σ`, so an uncertain model heats earlier. In the forecast an internal gain fades from its current value
+into its typical value for that hour of day (time constant 3 h, profile from the 14-day hour log) – a dehumidifier
+that runs now is not assumed to run for three days.
 
 **Weather:** every Open-Meteo request asks two weather models – `best_match` (ICON of the DWD in Germany) and
 ECMWF IFS. The outdoor temperature is their mean, **moved onto your outdoor sensor**: a sensor on a wall reads
@@ -210,7 +212,8 @@ Project notes for contributors (German): [`CLAUDE.md`](CLAUDE.md).
 - [x] Warm start from recorder history, comfort and quiet times from `schedule` helpers, diagnostics, repairs
 - [x] Charge and coast: upper/lower bound, coast time, Better Thermostat control, quiet times
 - [x] Blocks preferably with many open consumers; window-aware; block end matched to the anti-cycling lock
-- [ ] Internal gains forecast by daily profile (then house power as a gain signal)
+- [x] Internal gains forecast by daily profile (current value fading into the typical one)
+- [ ] House power as a gain signal; gain profile per weekday
 - [ ] Presence (`zone.home`) in comfort
 - [ ] Two-state model (air + thermal mass) or a smoothed solar signal
 - [ ] Raise the curve during a block (charge the screed on purpose)
