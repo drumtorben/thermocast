@@ -24,6 +24,7 @@ from custom_components.thermocast.coordinator import (
     ZoneRuntime,
     zone_base,
     zone_charge_cap,
+    zone_charge_target,
     zone_floor,
     zone_high,
     zone_quiet,
@@ -60,6 +61,20 @@ async def test_quiet_hours_over_midnight(hass: HomeAssistant) -> None:
     assert not zone_quiet(z, _local(hass, 18, 50)) and zone_quiet(z, _local(hass, 18, 50), lead=timedelta(minutes=15))
     assert zone_charge_cap(z, _local(hass, 12)) == 21.0  # charge to the upper bound
     assert zone_charge_cap(z, _local(hass, 23)) == 17.0  # quiet: the thermostat stays at the floor
+
+
+async def test_charge_target_outside_comfort(hass: HomeAssistant) -> None:
+    """Outside comfort time a block charges the zone only if comfort starts within PRECHARGE_H, else to the base."""
+    z = _z(**{CONF_BT_CONTROL: True, CONF_BT_ENTITY: "climate.bt", CONF_COMFORT_HIGH: 22.5, CONF_BASE_TEMP: 17.0})
+    assert zone_charge_target(z, _local(hass, 12)) == 22.5  # comfort time
+    assert zone_charge_target(z, _local(hass, 2)) == 22.5  # comfort starts at 06:00, in 4 h
+    assert zone_charge_target(z, _local(hass, 22, 30)) == 22.5  # next comfort in 7.5 h
+    z.schedule_plan = {"tuesday": [{"from": "08:00:00", "to": "15:00:00"}]}  # 2026-10-06 is a Tuesday
+    saturday = _local(hass, 10) - timedelta(days=3)  # 2026-10-03, no comfort until Tuesday
+    assert zone_charge_target(z, saturday) == 17.0
+    assert zone_charge_cap(z, saturday) == 17.0  # the planner sees the same target
+    assert zone_charge_target(z, _local(hass, 7)) == 22.5  # Tuesday morning, comfort in 1 h
+    assert zone_charge_target(z, _local(hass, 16)) == 17.0  # next comfort a week away
 
 
 async def test_open_window_neither_leads_nor_takes_heat(hass: HomeAssistant) -> None:

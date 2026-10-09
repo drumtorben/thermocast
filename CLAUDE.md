@@ -134,7 +134,9 @@ Live und im Rollout: `charge_cost(w)` („Laden & Zehren“, Spec `docs/superpow
   Unterschreitungen nach der Zehrzeit sind Sache des nächsten Blocks (außer Pause < 2 h).
   Ohne das sah der Ein-Block-Planer den nächsten Start nie, und der Regler wirkte nicht.
 - Läuft ein Block schon (`running`), kostet Weiterheizen keinen Start (sonst bricht die Neuplanung Blöcke ab).
-- BT-gesteuerte Zonen sind gedeckelt (`charge_cap`): q = 0, sobald die Zone ihre Obergrenze (Ruhezeit: Grundwert) erreicht.
+- BT-gesteuerte Zonen sind gedeckelt (`charge_cap`): q = 0, sobald die Zone ihr Ladeziel (Ruhezeit: Grundwert) erreicht.
+  Ladeziel (`zone_charge_target`) = Obergrenze in der Komfortzeit oder wenn sie in ≤ 12 h beginnt (`PRECHARGE_H`), sonst
+  Grundwert – Anlass: Büro wurde samstags in den Wohnzimmer-Blöcken auf 22,5 °C geladen, ohne Komfort bis Montag.
 - **Wenig Abnehmer** (`cycling`): Blockstunden, in denen BT-Räume zu sind (Anteil an allen BT-Räumen), kosten
   `(1+9w)·24/(Start+Länge+Zehrzeit)·60/45` je Stunde – mit wenigen offenen Kreisen taktet der Brenner im Block
   (Taktsperre 45 min). Legt Blöcke in Stunden, in denen viele Räume Wärme nehmen (z. B. vor einer Ruhezeit).
@@ -169,7 +171,7 @@ für die Wärmepumpe später COP(T_out, Vorlauf), Strompreis, PV-Überschuss.
 - **Taktsperre** (Option `anti_cycle_minutes` + Sensor Brennerstarts): endet die Sperre vor dem nächsten Update und
   liefe der folgende Neustart < 15 min bis Blockende, endet der Block jetzt (`trim_tail_restart`, Ereignis
   `block_trimmed`) – spart den kurzen letzten Start.
-- BT-Aktor (opt-in je Zone): im Block Obergrenze, sonst Untergrenze; nur bei Änderung, 0,5-K-Schritte,
+- BT-Aktor (opt-in je Zone): im Block Ladeziel (Obergrenze, fern vom Komfort Grundwert), sonst Untergrenze; nur bei Änderung, 0,5-K-Schritte,
   15–24 °C, ≤ 24/Tag; Handeingriff → Zone ruht bis Blockende (≥ 3 h); Ruhezeit: 15 min vorher Grundwert,
   dann nichts (Ausnahme: führende Zone < Grundwert − 1 K); Steuerung aus/Entladen → Untergrenze.
 

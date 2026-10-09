@@ -64,6 +64,7 @@ from .const import (
     FORECAST_MAX_AGE,
     FORECAST_STALE_FAILSAFE,
     HORIZON_HOURS,
+    PRECHARGE_H,
     STORAGE_VERSION,
     SUBENTRY_ZONE,
     UPDATE_INTERVAL,
@@ -258,12 +259,20 @@ def zone_quiet(z: ZoneRuntime, when: datetime, lead: timedelta = timedelta(0)) -
     return z.quiet_plan is not None and _in_schedule(local, z.quiet_plan)
 
 
+def zone_charge_target(z: ZoneRuntime, when: datetime) -> float:
+    """How far a block charges the zone: the upper bound in comfort time or when comfort starts within
+    PRECHARGE_H, otherwise only the base temperature (a room nobody uses before next week stays cool)."""
+    if any(zone_comfort(z, when + timedelta(hours=h)) is not None for h in range(PRECHARGE_H + 1)):
+        return zone_high(z)
+    return zone_base(z)
+
+
 def zone_charge_cap(z: ZoneRuntime, when: datetime) -> float | None:
-    """Where the zone's thermostat closes during a block: the upper bound, in quiet time the base temperature.
+    """Where the zone's thermostat closes during a block: the charge target, in quiet time the base temperature.
     None = no thermostat control (the zone takes what it gets)."""
     if not z.cfg.get(CONF_BT_CONTROL):
         return None
-    return zone_base(z) if zone_quiet(z, when) else zone_high(z)
+    return zone_base(z) if zone_quiet(z, when) else zone_charge_target(z, when)
 
 
 def zone_window_open(hass: HomeAssistant, z: ZoneRuntime) -> bool:

@@ -144,3 +144,33 @@ async def test_control_off_holds_the_lower_bound(hass: HomeAssistant, mock_entry
     floor_writes = [c for c in calls[n:] if c.data["temperature"] == 20.0]
     assert floor_writes or (calls and calls[-1].data["temperature"] == 20.0)
     assert coordinator.zone_actuator.to_dict()["zone_eg"]["last_written"] == 20.0
+
+
+async def test_block_far_from_comfort_holds_the_base(hass: HomeAssistant) -> None:
+    """A block runs for another zone, this room has no comfort for days: it stays at the base, not the upper bound."""
+    from datetime import datetime
+
+    from homeassistant.util import dt as dt_util
+
+    from custom_components.thermocast.coordinator import ZoneRuntime
+    from custom_components.thermocast.core.model import OnlineZoneModel, ZoneSpec
+    from custom_components.thermocast.events import EventLog
+    from custom_components.thermocast.zone_actuator import ZoneActuator
+
+    from .conftest import ZONE_DATA
+
+    data = {**ZONE_DATA, CONF_BT_CONTROL: True, CONF_BT_ENTITY: BT, CONF_COMFORT_HIGH: 22.5, CONF_BASE_TEMP: 17.0}
+    z = ZoneRuntime("office", "Büro", data, OnlineZoneModel(ZoneSpec()))
+    hass.states.async_set(BT, "heat", {"temperature": 17.0})
+    calls = async_mock_service(hass, "climate", "set_temperature")
+    act = ZoneActuator(hass, EventLog())
+    act.load({"office": {"last_written": 17.0}})
+    tz = dt_util.get_time_zone(hass.config.time_zone)
+    kw = {"block_on": True, "failsafe": False, "enabled": True}
+    z.schedule_plan = {"monday": [{"from": "08:00:00", "to": "15:00:00"}]}
+    saturday = datetime(2026, 10, 10, 10, tzinfo=tz)
+    out = await act.async_apply({"office": z}, {"office": 19.5}, now=saturday, **kw)
+    assert out["office"]["reason"] == "unchanged" and calls == []  # stays at 17, no write
+    sunday_evening = datetime(2026, 10, 11, 21, tzinfo=tz)  # comfort Monday 08:00 is < 12 h away
+    out = await act.async_apply({"office": z}, {"office": 19.5}, now=sunday_evening, **kw)
+    assert calls[-1].data["temperature"] == 22.5

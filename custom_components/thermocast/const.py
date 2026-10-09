@@ -68,6 +68,7 @@ CONF_QUIET_SCHEDULE = "quiet_schedule"  # optional schedule.* entity: more quiet
 DEFAULT_HIGH_OFFSET = 1.0  # K above comfort
 DEFAULT_BASE_OFFSET = 2.0  # K below comfort
 QUIET_LEAD = timedelta(minutes=15)  # set the floor this long before the quiet time starts
+PRECHARGE_H = 12  # outside comfort time a block charges a BT zone only if comfort starts within this many hours
 
 HEAT_TYPES = ["fbh", "radiator"]
 DEFAULT_Q_ON = 10.0  # K, initial guess of the heating proxy while heating

@@ -92,7 +92,7 @@ class ZoneActuator:
     ) -> dict[str, dict[str, Any]]:
         """Decide (and, when ``enabled``, write) every BT-controlled zone. Returns per zone
         ``{"target", "reason", "override_until"}`` for the panel."""
-        from .coordinator import zone_base, zone_floor, zone_high, zone_quiet, zone_window_open
+        from .coordinator import zone_base, zone_charge_target, zone_floor, zone_quiet, zone_window_open
 
         out: dict[str, dict[str, Any]] = {}
         today = dt_util.as_local(now).date()
@@ -116,7 +116,7 @@ class ZoneActuator:
                 s.override_until, s.last_written = None, None  # override over: take the room back
             quiet_now = zone_quiet(z, now)
             inp = BtInput(
-                block_on=block_on, failsafe=failsafe, floor_now=zone_floor(z, now), high=zone_high(z),
+                block_on=block_on, failsafe=failsafe, floor_now=zone_floor(z, now), high=zone_charge_target(z, now),
                 base=zone_base(z), quiet_now=quiet_now, quiet_soon=not quiet_now and zone_quiet(z, now, QUIET_LEAD),
                 temp=temps.get(zid), leads=bool(z.cfg.get(CONF_LEADS_RELEASE, True)),
                 window_open=zone_window_open(self.hass, z),
