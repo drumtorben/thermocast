@@ -273,6 +273,7 @@ async def test_dhw_charging_is_not_space_heating(hass: HomeAssistant, mock_entry
     assert await hass.config_entries.async_setup(mock_entry.entry_id)
     await hass.async_block_till_done()
 
+    freezer.move_to("2026-10-04 11:00:00+00:00")
     hass.states.async_set("binary_sensor.dhw_charging", "off")  # hour 11: space heating, the flow counts
     freezer.move_to("2026-10-04 11:05:00+00:00")
     async_fire_time_changed(hass)
@@ -339,6 +340,7 @@ async def test_radiator_heats_only_while_its_thermostat_heats(
     assert await hass.config_entries.async_setup(mock_entry.entry_id)
     await hass.async_block_till_done()
 
+    freezer.move_to("2026-10-04 11:00:00+00:00")
     hass.states.async_set("climate.trv", "heat", {"hvac_action": "heating"})
     freezer.move_to("2026-10-04 11:05:00+00:00")
     async_fire_time_changed(hass)
@@ -350,6 +352,33 @@ async def test_radiator_heats_only_while_its_thermostat_heats(
     async_fire_time_changed(hass)
     await hass.async_block_till_done(wait_background_tasks=True)
     assert z.log.to_list()[-1]["rec"]["q"] == pytest.approx(45.0 - 20.4)
+
+
+async def test_cycling_burner_is_learned_time_weighted(
+    hass: HomeAssistant, mock_entry, mock_open_meteo, freezer, hass_storage
+) -> None:
+    """A 6-min burner run between 15-min updates: the heating proxy follows the flow by state change."""
+    freezer.move_to("2026-10-04 10:05:00+00:00")
+    mock_open_meteo(5.0)
+    await _setup_states(hass)
+    hass.states.async_set("binary_sensor.heating_pump", "on")
+    hass.states.async_set("sensor.flow", "25.0", {"device_class": "temperature"})
+    await _setup_entry(hass, mock_entry)
+    for at, flow in (("10:59", "25.2"), ("11:00", "25.0"), ("11:20", "47.4"), ("11:26", "25.0"), ("11:50", "25.1")):
+        freezer.move_to(f"2026-10-04 {at}:00+00:00")
+        hass.states.async_set("sensor.flow", flow, {"device_class": "temperature"})
+        await hass.async_block_till_done()
+    zr = mock_entry.runtime_data.zones["zone_eg"]
+    await mock_entry.runtime_data.async_save()  # the running hour survives a restart
+    pending = hass_storage[f"{DOMAIN}.{mock_entry.entry_id}"]["data"]["zones"]["zone_eg"]["pending"]
+    assert pending["q_tw"]["2026-10-04T11:00:00+00:00"][1] == 50 * 60
+
+    freezer.move_to("2026-10-04 12:05:00+00:00")
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    q = zr.log.to_list()[-1]["rec"]["q"]
+    assert zr.log.to_list()[-1]["t"] == "2026-10-04T11:00:00+00:00"
+    assert q == pytest.approx((44 * (25.0 - 20.4) + 6 * (47.4 - 20.4) + 10 * (25.1 - 20.4)) / 60, abs=0.01)
 
 
 async def test_hour_close_learns_and_persists(

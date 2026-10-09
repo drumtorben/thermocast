@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, time, timedelta
 from functools import partial
@@ -84,6 +85,7 @@ from .core.rules import (
     window_recovering,
     window_recovery_temp,
 )
+from .core.series import HourlyIntegral
 from .core.weather import OutdoorBias
 from .events import EventLog
 from .view_builder import ViewBuilder
@@ -100,6 +102,7 @@ STARTUP_HOLD_REASONS = ("no_temperature", "no_forecast", "forecast_gap", "no_zon
 WARMSTART_HOLD_MAX = timedelta(minutes=10)  # a zone model on its prior holds the release until the warm start
 RELOADING = "reloading"  # set by the update listener: the next unload is a self-reload, not a removal
 FORECAST_CACHE = "forecast"  # entry id -> Forecast: a reload reuses a fresh forecast instead of fetching again
+TW_MIN_COVERED = timedelta(minutes=15)  # less of the hour followed by state change: the samples decide
 
 
 # --------------------------------------------------------------------- helpers
@@ -178,6 +181,10 @@ class ZoneRuntime:
     window_seen: bool = False  # opened since the last sample
     window_before: float | None = None  # zone temperature when the window opened
     window_closed: datetime | None = None  # last close: the air recovers from the walls for a while
+    # heating proxy and pump share, time-weighted from state changes (a cycling burner's short runs fall
+    # between the 15-min samples); the samples in ``acc`` remain the fallback for hours not covered
+    q_tw: HourlyIntegral = field(default_factory=HourlyIntegral)
+    pump_tw: HourlyIntegral = field(default_factory=HourlyIntegral)
 
     def reset_acc(self) -> None:
         self.acc = {"t_out": [], "q": [], "neighbors": [], "gains": [], "window": [], "pump": []}
@@ -303,6 +310,32 @@ def zone_temp(hass: HomeAssistant, z: ZoneRuntime) -> float | None:
     return _mean([_num(hass, e) for e in z.cfg.get(CONF_TEMP_SENSORS, [])])
 
 
+def heating_inputs(
+    hass: HomeAssistant, data: Mapping[str, Any], options: Mapping[str, Any]
+) -> tuple[bool | None, float | None]:
+    """(space heating running, flow temperature) right now."""
+    flow = _num(hass, data.get(CONF_FLOW_TEMP_SENSOR))
+    heating = _is_on(hass, data.get(CONF_HEATING_ACTIVE)) if data.get(CONF_HEATING_ACTIVE) else None
+    if heating is None and flow is not None and not data.get(CONF_HEATING_ACTIVE):
+        # no 'heating active' entity configured: rely on flow temperature only
+        # (less accurate – DHW charging also raises the boiler flow temperature)
+        heating = True
+    if _is_on(hass, options.get(CONF_DHW_ENTITY)):
+        heating = False  # combi boiler: hot water charging runs the same pump with a hot flow
+    return heating, flow
+
+
+def zone_q(hass: HomeAssistant, z: ZoneRuntime, temp: float, heating: bool | None, flow: float | None) -> float:
+    """Heating proxy of the zone right now: flow above the room while the pump heats (× valve share)."""
+    if not heating or flow is None:
+        return 0.0
+    q = max(0.0, flow - temp)
+    if z.cfg.get(CONF_HEAT_TYPE) == "radiator" and z.cfg.get(CONF_VALVE_ENTITY):
+        valve = _valve_share(hass, z.cfg[CONF_VALVE_ENTITY])
+        q *= valve if valve is not None else 0.0
+    return q
+
+
 def zone_airing(hass: HomeAssistant, z: ZoneRuntime, now: datetime) -> bool:
     """A window is open or closed only recently: the air temperature says little about the stored heat."""
     return zone_window_open(hass, z) or window_recovering(z.window_closed, now)
@@ -422,6 +455,8 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
                     zr.pending_hour = datetime.fromisoformat(pending["hour"])
                     zr.pending_temp = pending.get("temp")
                     zr.acc = {k: list(v) for k, v in pending.get("acc", {}).items()} or zr.acc
+                    zr.q_tw.load(pending.get("q_tw"))
+                    zr.pump_tw.load(pending.get("pump_tw"))
                 window = saved.get("window") or {}  # a reload within the recovery hour keeps it
                 zr.window_before = window.get("before")
                 zr.window_closed = datetime.fromisoformat(window["closed"]) if window.get("closed") else None
@@ -508,6 +543,8 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
                         "hour": z.pending_hour.isoformat() if z.pending_hour else None,
                         "temp": z.pending_temp,
                         "acc": z.acc,
+                        "q_tw": z.q_tw.to_dict(),
+                        "pump_tw": z.pump_tw.to_dict(),
                     },
                     "window": {
                         "before": z.window_before,
@@ -581,6 +618,36 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
                 detail = f"{z.window_before:.1f} °C" if z.window_before is not None else None
                 self.events.add(now, "window_recovery", zone=z.subentry_id, detail=detail)
             z.window_open = is_open
+
+    @callback
+    def async_track_heat(self) -> CALLBACK_TYPE:
+        """Follow the heating inputs by state change: the heating proxy is time-weighted per hour."""
+        data, options = self.config_entry.data, self.config_entry.options
+        ids = {data.get(CONF_FLOW_TEMP_SENSOR), data.get(CONF_HEATING_ACTIVE), options.get(CONF_DHW_ENTITY)}
+        for z in self.zones.values():
+            ids.add(z.cfg.get(CONF_VALVE_ENTITY))
+            ids.update(z.cfg.get(CONF_TEMP_SENSORS, []))
+        ids.discard(None)
+        ids.discard("")
+        if not ids:
+            return lambda: None
+        return async_track_state_change_event(self.hass, sorted(ids), self._heat_changed)
+
+    @callback
+    def _heat_changed(self, event: Event[EventStateChangedData]) -> None:
+        heating, flow = heating_inputs(self.hass, self.config_entry.data, self.config_entry.options)
+        self._feed_heat(dt_util.utcnow(), heating, flow)
+
+    def _pump_value(self, heating: bool | None) -> float | None:
+        """Pump running (space heating): which hours are block hours for q_on; None = no pump entity."""
+        return None if heating is None or not self.config_entry.data.get(CONF_HEATING_ACTIVE) else float(heating)
+
+    def _feed_heat(self, now: datetime, heating: bool | None, flow: float | None) -> None:
+        pump = self._pump_value(heating)
+        for z in self.zones.values():
+            temp = zone_temp(self.hass, z)
+            z.q_tw.set(now, None if temp is None else zone_q(self.hass, z, temp, heating, flow))
+            z.pump_tw.set(now, pump)
 
     async def async_warmstart(self, only_fresh: bool) -> dict[str, int]:
         """Learn zone models from recorder history (see warmstart.py). Never raises."""
@@ -684,14 +751,8 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
         if t_out is None and self.forecast:
             idx = self.forecast.index_of(now)
             t_out = self.forecast.t_out[idx] if idx is not None else None
-        flow = _num(hass, data.get(CONF_FLOW_TEMP_SENSOR))
-        heating = _is_on(hass, data.get(CONF_HEATING_ACTIVE)) if data.get(CONF_HEATING_ACTIVE) else None
-        if heating is None and flow is not None and not data.get(CONF_HEATING_ACTIVE):
-            # no 'heating active' entity configured: rely on flow temperature only
-            # (less accurate – DHW charging also raises the boiler flow temperature)
-            heating = True
-        if _is_on(hass, self.config_entry.options.get(CONF_DHW_ENTITY)):
-            heating = False  # combi boiler: hot water charging runs the same pump with a hot flow
+        heating, flow = heating_inputs(hass, data, self.config_entry.options)
+        self._feed_heat(now, heating, flow)  # integrates up to now – before an hour closes
 
         hour_closed = False
         for z in self.zones.values():
@@ -709,17 +770,9 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
                 z.pending_hour, z.pending_temp = hour, temp
                 z.reset_acc()
             # 2) accumulate inputs of the running hour
-            q = 0.0
-            if heating and flow is not None:
-                q = max(0.0, flow - temp)
-                if z.cfg.get(CONF_HEAT_TYPE) == "radiator" and z.cfg.get(CONF_VALVE_ENTITY):
-                    valve = _valve_share(hass, z.cfg[CONF_VALVE_ENTITY])
-                    q *= valve if valve is not None else 0.0
             z.acc["t_out"].append(t_out)
-            z.acc["q"].append(q)
-            # pump running (space heating): which hours are block hours for q_on; None = no pump entity
-            pump = None if heating is None or not data.get(CONF_HEATING_ACTIVE) else float(heating)
-            z.acc.setdefault("pump", []).append(pump)
+            z.acc["q"].append(zone_q(hass, z, temp, heating, flow))
+            z.acc.setdefault("pump", []).append(self._pump_value(heating))
             z.acc["neighbors"].append([_num(hass, e) for e in z.cfg.get(CONF_NEIGHBOR_SENSORS, [])])
             z.acc["gains"].append([_or(_num(hass, e), 0.0) for e in z.cfg.get(CONF_GAIN_ENTITIES, [])])
             # aired since the last sample, open now or still recovering: the hour is not learned
@@ -821,7 +874,8 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
             if idx is not None:
                 irr = self.forecast.irr_at(idx)
         t_out = _mean(acc["t_out"])
-        q = _or(_mean(acc["q"]), 0.0)
+        hour = z.pending_hour
+        q = _or(z.q_tw.mean(hour, TW_MIN_COVERED) if hour else None, _or(_mean(acc["q"]), 0.0))
         # the end temperature is disturbed too while a window is open or the air still recovers
         aired = any(acc["window"]) or z.window_seen or zone_airing(self.hass, z, now)
         valid = consecutive and t_out is not None and not aired and bool(irr or not z.model.spec.surfaces)
@@ -839,6 +893,8 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
         err = z.model.update(rec, temp_now)
         pumps = acc.get("pump", [])
         pump_share = _mean(pumps) if pumps and all(p is not None for p in pumps) else None
+        if pump_share is not None and hour:
+            pump_share = _or(z.pump_tw.mean(hour, TW_MIN_COVERED), pump_share)
         z.q_on = update_q_on(z.q_on, q, pump_share)  # the typical heating proxy of a block hour
         if z.pending_hour is not None:
             z.log.append(

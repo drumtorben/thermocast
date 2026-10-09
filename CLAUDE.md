@@ -105,7 +105,10 @@ T[t+1] − T[t] = b0 + a·(T_out − T)
 
 - `I_s`: Open-Meteo GTI für die Ausrichtung der Fläche (Kompass-Azimut → Open-Meteo: 0=S, −90=O).
   Fläche × g-Wert × Verschattung steckt im gelernten Koeffizienten.
-- `Q` (Heiz-Proxy): `max(0, Vorlauf − T_raum)` solange Heizungspumpe läuft und keine WW-Ladung (Option);
+- `Q` (Heiz-Proxy): `max(0, Vorlauf − T_raum)` solange Heizungspumpe läuft und keine WW-Ladung (Option),
+  **zeitgewichtet** über State-Changes von Vorlauf/Pumpe/WW/Ventil/Raumfühler (`HourlyIntegral`, Wert hält ≤ 30 min;
+  < 15 min Abdeckung → die 15-min-Stichproben). Anlass: taktender Brenner, 4 Stichproben/h lagen in Takt-Stunden
+  um bis zu +75 % daneben (12-Uhr-Stunde: 13,3 statt 9,0). Pumpen-Anteil für `q_on` ebenso;
   Heizkörper × Ventilanteil – bevorzugt `hvac_action` des TRV-Thermostats (heating/idle), denn der TRVZB
   meldet keine echte Ventilstellung (`valve_opening_degree` ist nur eine Grenze).
 - `q_on` (Heiz-Proxy, den der Planer je Blockstunde annimmt): EMA (α 0,2) nur über Stunden mit Pumpe ≥ 75 % der

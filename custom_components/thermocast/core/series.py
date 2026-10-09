@@ -98,3 +98,52 @@ def hourly_fraction(
 ) -> list[float | None]:
     """Share of each hour in which ``value_of(state)`` is 1 (on)."""
     return _hourly(series, hours, end, value_of)
+
+
+def _hour_of(t: datetime) -> datetime:
+    return t.replace(minute=0, second=0, microsecond=0)
+
+
+class HourlyIntegral:
+    """Live time-weighted hourly means of a signal fed at its changes: a value holds until the next one.
+
+    E.g. the heating proxy of a cycling burner – four samples per hour hit or miss its short runs.
+    A value holds at most ``max_hold`` (a silent feed is a gap, not a constant); None is a gap too.
+    """
+
+    def __init__(self, max_hold: timedelta = timedelta(minutes=30), keep_hours: int = 3) -> None:
+        self._max_hold = max_hold
+        self._keep = keep_hours
+        self._value: float | None = None
+        self._since: datetime | None = None
+        self._hours: dict[datetime, list[float]] = {}  # hour start -> [value · s, s]
+
+    def set(self, now: datetime, value: float | None) -> None:
+        if self._since is not None and now < self._since:
+            return  # clock went backwards: keep the running segment
+        if self._since is not None and self._value is not None:
+            t, end = self._since, min(now, self._since + self._max_hold)
+            while t < end:
+                b = min(_hour_of(t) + HOUR, end)
+                acc = self._hours.setdefault(_hour_of(t), [0.0, 0.0])
+                seconds = (b - t).total_seconds()
+                acc[0] += self._value * seconds
+                acc[1] += seconds
+                t = b
+        self._value, self._since = value, now
+        oldest = _hour_of(now) - self._keep * HOUR
+        self._hours = {h: acc for h, acc in self._hours.items() if h >= oldest}
+
+    def mean(self, hour: datetime, min_covered: timedelta = timedelta(0)) -> float | None:
+        """Mean over the covered part of ``hour`` (None: less than ``min_covered``, or nothing, covered)."""
+        acc = self._hours.get(hour)
+        if not acc or acc[1] <= 0 or acc[1] < min_covered.total_seconds():
+            return None
+        return acc[0] / acc[1]
+
+    def to_dict(self) -> dict[str, list[float]]:
+        return {h.isoformat(): list(acc) for h, acc in self._hours.items()}
+
+    def load(self, data: dict[str, list[float]] | None) -> None:
+        """Restore the collected hours; the running value restarts with the next feed (no hold across a restart)."""
+        self._hours = {datetime.fromisoformat(h): [float(acc[0]), float(acc[1])] for h, acc in (data or {}).items()}
