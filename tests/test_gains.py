@@ -61,15 +61,36 @@ def test_gain_in_watts_is_learned():
     assert m.params()["gain:0"] == pytest.approx(3e-4, rel=0.4)
 
 
-def test_growing_scale_keeps_predictions():
+def test_standby_watts_then_a_real_run_stay_plausible():
+    """Weeks at 1–1.5 W standby (the largest value seen, i.e. "full load"), then hours at ~300 W with an
+    unexplained rise: the effect learned at 1.5 W must not be extrapolated linearly to 300 W."""
+    sim = simulate(days=16, seed=4)
+    m = OnlineZoneModel(GSPEC)
+    for i in range(14 * 24):
+        standby = 1.5 if (i // 9) % 2 else 1.0
+        m.update(_rec(sim, i, standby), float(sim["air"][i + 1]))
+    for i in range(14 * 24, 14 * 24 + 3):
+        m.update(_rec(sim, i, 290.0), float(sim["air"][i + 1]) + 0.3)
+    on = m.predict(21.0, _fut(300.0)).mean
+    off = m.predict(21.0, _fut(0.0)).mean
+    assert max(a - b for a, b in zip(on, off)) < 3.0
+
+
+def test_growing_scale_keeps_the_full_load_effect():
+    """A new largest value does not multiply the learned effect: what was learned at the old maximum holds at the
+    new one (bounded), learning then corrects it."""
     sim = simulate(days=10, seed=1, gain_w=lambda i: 200.0 if i % 6 < 3 else 0.0)
     m = _train(sim, 10 * 24 - 1)
-    before = m.predict(20.0, _fut(200.0, 24))
-    params = m.params()
+    before = m.predict(20.0, _fut(200.0, 24)).mean
     m._grow_gain_scale((800.0,))
-    after = m.predict(20.0, _fut(200.0, 24))
-    assert after.mean == pytest.approx(before.mean, abs=1e-9)
-    assert m.params()["gain:0"] == pytest.approx(params["gain:0"])
+    assert m.predict(20.0, _fut(800.0, 24)).mean == pytest.approx(before, abs=1e-9)
+
+
+def test_gain_variance_stays_at_most_the_prior():
+    sim = simulate(days=20, seed=3)
+    m = _train(sim, 20 * 24 - 1)  # gain always 0: never excited
+    col = _gain_col(m)
+    assert m.P[col, col] <= OnlineZoneModel(GSPEC).P[col, col] * (1 + 1e-9)
 
 
 def test_scale_is_stored():
@@ -81,11 +102,13 @@ def test_scale_is_stored():
 
 
 def test_legacy_gain_parameters_are_reset():
-    """Before v0.8.4 gains were learned in raw units (K/h per W) – one hour could make them absurd."""
+    """Before v0.8.4 gains were learned in raw units (K/h per W) – one hour could make them absurd; v0.8.4/0.8.5
+    extrapolated an effect learned at a tiny maximum (standby) linearly. Both stores lack ``gain_max``."""
     sim = simulate(days=5, seed=2)
     m = _train(sim, 5 * 24 - 1)
     d = m.to_dict()
-    del d["gain_scale"]
+    del d["gain_max"]
+    d["gain_scale"] = [1.5]
     col = _gain_col(m)
     d["theta"][col] = 0.0147
     d["P"][col][col] = 0.05

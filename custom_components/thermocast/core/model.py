@@ -301,24 +301,26 @@ class OnlineZoneModel:
         return scale
 
     def _grow_gain_scale(self, gains: Sequence[float]) -> None:
-        """Raise the scale of gains above their largest value so far, keeping the predictions unchanged.
+        """Raise the scale of gains to a new largest value.
 
-        The parameter grows with the scale; its variance too, but at most to the prior – a never-excited
-        gain (always 0 W) has a wound-up variance that would otherwise give the first hour all the error.
+        The parameter (effect at the largest value) is kept, not multiplied: an effect learned at a tiny maximum
+        (1.5 W standby as "full load") must not be extrapolated linearly to 300 W. A new maximum thus never
+        raises a forecast; learning corrects the effect within hours.
         """
-        prior = self._prior_scale()
-        for i, col in enumerate(self._gain_cols):
+        for i in range(len(self._gain_cols)):
             g = abs(gains[i]) if i < len(gains) and math.isfinite(gains[i]) else 0.0
-            old = float(self.gain_scale[i])
-            if g <= old:
-                continue
-            r = g / old
-            self.theta[col] *= r
+            self.gain_scale[i] = max(float(self.gain_scale[i]), g)
+
+    def _cap_gain_variance(self) -> None:
+        """Gain variance at most the prior: a gain at 0 W for weeks winds up its variance (forgetting), and the
+        first hour with the device on would get the whole error of that hour."""
+        prior = self._prior_scale()
+        for col in self._gain_cols:
             p = float(self.P[col, col])
-            f = r if p * r * r <= prior[col] else math.sqrt(prior[col] / p)
-            self.P[col, :] *= f
-            self.P[:, col] *= f
-            self.gain_scale[i] = g
+            if p > prior[col]:
+                f = math.sqrt(prior[col] / p)
+                self.P[col, :] *= f
+                self.P[:, col] *= f
 
     def _reset_gains(self) -> None:
         """Gain parameters back to the prior (no correlation with the rest)."""
@@ -400,6 +402,7 @@ class OnlineZoneModel:
         tr = float(np.sum(np.diag(self.P) / self._prior_scale()))
         if tr > self.max_trace:
             self.P *= self.max_trace / tr
+        self._cap_gain_variance()
 
         self.resid_var = 0.98 * self.resid_var + 0.02 * min(err * err, 1.0)
         self.mae = abs(err) if self.n_updates == 0 else 0.97 * self.mae + 0.03 * abs(err)
@@ -605,7 +608,7 @@ class OnlineZoneModel:
             "n_updates": self.n_updates,
             "resid_var": self.resid_var,
             "mae": self.mae,
-            "gain_scale": self.gain_scale.tolist(),
+            "gain_max": self.gain_scale.tolist(),
         }
 
     def load_dict(self, data: dict[str, Any]) -> bool:
@@ -614,9 +617,11 @@ class OnlineZoneModel:
             return False
         self.theta = np.asarray(data["theta"], dtype=float)
         self.P = np.asarray(data["P"], dtype=float)
-        if "gain_scale" in data and len(data["gain_scale"]) == self.spec.n_gains:
-            self.gain_scale = np.asarray(data["gain_scale"], dtype=float)
-        else:  # stored before gains were normalised (≤ v0.8.3): raw-unit parameters, one hour could ruin them
+        if "gain_max" in data and len(data["gain_max"]) == self.spec.n_gains:
+            self.gain_scale = np.asarray(data["gain_max"], dtype=float)
+        else:
+            # ≤ v0.8.3: raw-unit parameters (one hour could ruin them); v0.8.4/0.8.5 ("gain_scale"): an effect learned
+            # at a tiny maximum was extrapolated linearly when the maximum grew – start the gains afresh
             self._reset_gains()
         self.history = [HourRecord.from_dict(h) for h in data.get("history", [])]
         self.n_updates = int(data.get("n_updates", 0))

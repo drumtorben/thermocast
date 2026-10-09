@@ -117,13 +117,14 @@ T[t+1] − T[t] = b0 + a·(T_out − T)
   (WZ 3,2 statt ~15 in Blöcken) und der Planer unterschätzte Blöcke um Faktor 4–5.
 - RLS: Vergessensfaktor 0,996/h (~10 Tage), Vorzeichen-Projektion (alles außer Bias ≥ 0),
   Huber-Clipping (3σ), Kovarianz-Deckel (normierte Spur ≤ 50) gegen Wind-up im Sommer.
-- **Gewinne normiert** (v0.8.4): Modell sieht `G / gain_scale` (größter bisher gesehener |G|, ≥ 1; wächst die Skala,
-  wird θ mitskaliert → Prognose unverändert, Varianz höchstens auf den Prior `GAIN_PRIOR_VAR` 0,1). `params()` und
-  Tab „Modell“ zeigen weiter „K/h pro Einheit“. Anlass: Leistungssensor (W) mit Prior 1e-3, 14 Tage 0 W → Varianz
-  aufgezogen, die erste Stunde mit 154 W gab dem Gewinn den ganzen Fehler (0,0147 K/h/W → Prognose 120 °C). Gespeicherte
-  Modelle ohne `gain_scale` setzen die Gewinn-Parameter beim Laden zurück (Tests: `tests/test_gains.py`).
-  In der Vorhersage sättigt der Eingang beim größten gesehenen Wert (`_gain_feature`, v0.8.5) – sonst blähte
-  eine frische Skala 1 bei 300 W das σ um 300² auf (Band ±20 K nach dem Update auf v0.8.4).
+- **Gewinne normiert** (v0.8.4–0.8.6): Modell sieht `G / gain_scale` (größter bisher gesehener |G|, ≥ 1, Store
+  `gain_max`), θ = Effekt beim Maximum in K/h. Wächst die Skala, bleibt θ (**nicht** mitskalieren: v0.8.4/0.8.5 taten
+  das – ein bei 1,5 W Standby gelernter Effekt wäre linear auf 300 W hochgerechnet worden, ~10 K/h). Varianz je Gewinn
+  nach jedem Schritt ≤ Prior `GAIN_PRIOR_VAR` 0,1 (`_cap_gain_variance`). Vorhersage sättigt beim Maximum
+  (`_gain_feature`; sonst blähte eine frische Skala 1 bei 300 W das σ auf ±20 K). `params()`/Tab „Modell“: „K/h pro
+  Einheit“. Anlass: W-Sensor mit Prior 1e-3, 14 Tage 0 W → aufgezogene Varianz, die erste Stunde mit 154 W gab dem
+  Gewinn den ganzen Fehler (0,0147 K/h/W → Prognose 120 °C). Stores ohne `gain_max` setzen die Gewinne beim Laden
+  zurück (Tests: `tests/test_gains.py`, u. a. Standby-dann-Volllast).
 - **Gewinn-Prognose** (`gain_path`): aktueller Wert klingt (τ 3 h) zum typischen Wert der Tagesstunde ab
   (`typical_gains` aus dem 14-Tage-Stunden-Log; fehlende Stunde → Gesamtmittel; ohne Log konstant wie früher).
   Stunden mit offenem Fenster/Datenlücke: nicht lernen, nur Historie fortschreiben.
@@ -213,7 +214,7 @@ Attr. Parameter + Sonnenantwort je Fläche).
 
 ---
 
-## 4. Status (v0.8.5)
+## 4. Status (v0.8.6)
 
 - ✅ Kern getestet auf synthetischen Daten: 1-Schritt-MAE ≈ 0,03 K/h, 24-h-Prognose-MAE ≈ 0,1 K,
   Ostfenster und Süddach werden getrennt gelernt, Planer heizt bei −5 °C, nicht bei 18 °C.
@@ -284,6 +285,7 @@ Attr. Parameter + Sonnenantwort je Fläche).
   v0.8.4: innere Gewinne normiert gelernt (W-Sensor ließ eine Zonen-Prognose auf 120 °C laufen), Gewinn-Prognose
   klingt zum Tagesprofil ab; echtes Zonen-Log nachgespielt: 0,00017 K/h/W statt 0,0147, konstant 300 W → max. +1,1 K.
   v0.8.5: Gewinn-Eingang der Vorhersage sättigt beim größten gesehenen Wert (σ-Band nach Gewinn-Reset ±20 K → normal).
+  v0.8.6: neues Maximum skaliert den Effekt nicht mehr hoch (Warmstart lernte bei 1,5 W Standby), Gewinn-Varianz ≤ Prior.
   Erkenntnis an der Anlage: an milden Tagen liefert die witterungsgeführte Kurve kaum Vorlauf → Fußpunkt anheben
   (README); längere Fenster-Verzögerungen (0–3 h) getestet und verworfen (MAE minimal schlechter).
 - Bekannte Schwächen:
