@@ -85,9 +85,14 @@ async def test_new_zone_learns_from_history(hass: HomeAssistant, mock_entry: Moc
     assert await c.async_warmstart(only_fresh=True) == {}
     # an installation from before the sensor offset: trained zones, no offset yet -> learned at the next start
     c.outdoor_bias = OutdoorBias()
-    assert await c.async_warmstart(only_fresh=True) == {}
+    await c.async_save()
+    assert await hass.config_entries.async_reload(mock_entry.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    c = mock_entry.runtime_data
+    zr = c.zones["zone_eg"]
     assert c.outdoor_bias.profile() == pytest.approx([1.5] * 24, abs=0.01)
-    assert zr.model.n_updates == before
+    assert zr.model.n_updates == before  # the trained zone was not re-learned
+    before = zr.model.n_updates
     button = er.async_get(hass).async_get_entity_id("button", DOMAIN, f"{mock_entry.entry_id}_warmstart")
     await hass.services.async_call("button", "press", {"entity_id": button}, blocking=True)
     await hass.async_block_till_done()

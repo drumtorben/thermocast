@@ -9,7 +9,7 @@ from homeassistant.helpers.typing import ConfigType
 from homeassistant.loader import async_get_integration
 
 from . import panel, websocket_api
-from .const import DOMAIN, PLATFORMS, SUBENTRY_ZONE
+from .const import CONF_OUTDOOR_SENSOR, DOMAIN, PLATFORMS, SUBENTRY_ZONE
 from .coordinator import RELOADING, ThermocastCoordinator
 
 type ThermocastConfigEntry = ConfigEntry[ThermocastCoordinator]
@@ -46,8 +46,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ThermocastConfigEntry) -
     configured = {sid for sid, sub in entry.subentries.items() if sub.subentry_type == SUBENTRY_ZONE}
     if configured != set(coordinator.zones):
         _self_reload(hass, entry)
-    elif any(z.model.n_updates == 0 for z in coordinator.zones.values()):
-        # new zones learn from the recorder history instead of starting from the prior
+    elif any(z.model.n_updates == 0 for z in coordinator.zones.values()) or (
+        coordinator.outdoor_bias.empty and entry.data.get(CONF_OUTDOOR_SENSOR)
+    ):
+        # new zones learn from the recorder history instead of starting from the prior; so does a missing
+        # outdoor sensor offset (an installation from before 0.8.0: trained zones, no offset yet)
         entry.async_create_background_task(
             hass, coordinator.async_warmstart(only_fresh=True), "thermocast_warmstart"
         )
