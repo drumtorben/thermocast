@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from itertools import pairwise
 
+import numpy as np
 import pytest
 
 from .core_helpers import SPEC
@@ -93,6 +94,26 @@ def test_legacy_gain_parameters_are_reset():
     assert m2.params()["gain:0"] == 0.0
     assert m2.P[col, col] == pytest.approx(OnlineZoneModel(GSPEC).P[col, col])
     assert m2.params()["loss"] == pytest.approx(m.params()["loss"])
+
+
+def test_unseen_gain_level_does_not_blow_up_sigma():
+    """Reset gains (scale 1) and a device at 300 W now: σ must not explode (it went to ±20 K)."""
+    sim = simulate(days=15, seed=4)
+    m = _train(sim, 14 * 24)
+    m._reset_gains()
+    on = m.predict(21.0, _fut(300.0, 48))
+    off = m.predict(21.0, _fut(0.0, 48))
+    assert on.mean == pytest.approx(off.mean)
+    assert max(a - b for a, b in zip(on.std, off.std)) < 0.5
+    q = np.zeros((1, 48))
+    _, std_b = m.predict_batch(21.0, _fut(300.0, 48), q)
+    assert std_b[0] == pytest.approx(on.std)
+
+
+def test_prediction_saturates_at_the_largest_seen_gain():
+    sim = simulate(days=10, seed=1, gain_w=lambda i: 200.0 if i % 6 < 3 else 0.0)
+    m = _train(sim, 10 * 24 - 1)
+    assert m.predict(20.0, _fut(1000.0, 12)).mean == pytest.approx(m.predict(20.0, _fut(200.0, 12)).mean)
 
 
 def test_typical_gains_per_hour_with_fallback():

@@ -358,8 +358,16 @@ class OnlineZoneModel:
             n = rec.neighbors[i] if i < len(rec.neighbors) else rec.temp
             phi.append(n - rec.temp)
         for i in range(self.spec.n_gains):
-            phi.append(rec.gains[i] / self.gain_scale[i] if i < len(rec.gains) else 0.0)
+            phi.append(self._gain_feature(rec.gains, i))
         return np.asarray(phi, dtype=float)
+
+    def _gain_feature(self, gains: Sequence[float], i: int) -> float:
+        """Normalised gain, saturated at the largest value seen: learning grows the scale first, so this only
+        caps a forecast beyond anything seen (a fresh/reset scale of 1 vs. 300 W would blow up σ by 300²)."""
+        if i >= len(gains):
+            return 0.0
+        g = gains[i]
+        return g / max(float(self.gain_scale[i]), abs(g))
 
     # ------------------------------------------------------------------ update
     def update(self, rec: HourRecord, temp_next: float) -> float | None:
@@ -544,7 +552,7 @@ class OnlineZoneModel:
                     temp_cols[t].append(col)
                 col += 1
             for i in range(self.spec.n_gains):
-                const[t, col] = rec.gains[i] / self.gain_scale[i] if i < len(rec.gains) else 0.0
+                const[t, col] = self._gain_feature(rec.gains, i)
                 col += 1
 
         means = np.empty((n_s, horizon))
