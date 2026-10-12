@@ -174,3 +174,76 @@ async def test_block_far_from_comfort_holds_the_base(hass: HomeAssistant) -> Non
     sunday_evening = datetime(2026, 10, 11, 21, tzinfo=tz)  # comfort Monday 08:00 is < 12 h away
     out = await act.async_apply({"office": z}, {"office": 19.5}, now=sunday_evening, **kw)
     assert calls[-1].data["temperature"] == 22.5
+
+
+async def test_quiet_time_switches_off_and_back_on(hass: HomeAssistant) -> None:
+    """Off 15 min before the quiet time, nothing during it, on again at its end; a cold room breaks it."""
+    from datetime import datetime
+
+    from homeassistant.util import dt as dt_util
+
+    from custom_components.thermocast.const import CONF_QUIET_FROM, CONF_QUIET_TO
+    from custom_components.thermocast.coordinator import ZoneRuntime
+    from custom_components.thermocast.core.model import OnlineZoneModel, ZoneSpec
+    from custom_components.thermocast.events import EventLog
+    from custom_components.thermocast.zone_actuator import ZoneActuator
+
+    from .conftest import ZONE_DATA
+
+    data = {**ZONE_DATA, CONF_BT_CONTROL: True, CONF_BT_ENTITY: BT, CONF_BASE_TEMP: 17.0,
+            CONF_QUIET_FROM: "12:00:00", CONF_QUIET_TO: "14:00:00"}
+    z = ZoneRuntime("kid", "Kind", data, OnlineZoneModel(ZoneSpec()))
+    hass.states.async_set(BT, "heat", {"temperature": 19.5})
+    temps = async_mock_service(hass, "climate", "set_temperature")
+    modes = async_mock_service(hass, "climate", "set_hvac_mode")
+    act = ZoneActuator(hass, EventLog())
+    act.load({"kid": {"last_written": 19.5}})
+    tz = dt_util.get_time_zone(hass.config.time_zone)
+    kw = {"block_on": False, "failsafe": False, "enabled": True}
+
+    out = await act.async_apply({"kid": z}, {"kid": 20.8}, now=datetime(2026, 10, 12, 11, 50, tzinfo=tz), **kw)
+    assert out["kid"]["reason"] == "off" and [c.data["hvac_mode"] for c in modes] == ["off"] and temps == []
+    hass.states.async_set(BT, "off", {})
+    for minute in (0, 30):  # quiet: not touched
+        out = await act.async_apply({"kid": z}, {"kid": 20.5}, now=datetime(2026, 10, 12, 12, minute, tzinfo=tz), **kw)
+        assert out["kid"]["reason"] == "quiet" and len(modes) == 1 and temps == []
+    out = await act.async_apply({"kid": z}, {"kid": 15.9}, now=datetime(2026, 10, 12, 13, tzinfo=tz), **kw)
+    assert [c.data["hvac_mode"] for c in modes] == ["off", "heat"] and temps[-1].data["temperature"] == 17.0
+    hass.states.async_set(BT, "heat", {"temperature": 17.0})
+    out = await act.async_apply({"kid": z}, {"kid": 16.5}, now=datetime(2026, 10, 12, 13, 30, tzinfo=tz), **kw)
+    assert out["kid"]["reason"] == "unchanged" and len(modes) == 2  # below the base: stays on
+    out = await act.async_apply({"kid": z}, {"kid": 17.2}, now=datetime(2026, 10, 12, 13, 45, tzinfo=tz), **kw)
+    assert out["kid"]["reason"] == "off" and len(modes) == 3
+    hass.states.async_set(BT, "off", {})
+    out = await act.async_apply({"kid": z}, {"kid": 17.2}, now=datetime(2026, 10, 12, 14, 5, tzinfo=tz), **kw)
+    assert modes[-1].data["hvac_mode"] == "heat" and out["kid"]["reason"] == "write"
+    assert "bt_override" not in [e["type"] for e in act.events.to_list()]
+
+
+async def test_switched_on_by_hand_in_quiet_time_is_an_override(hass: HomeAssistant) -> None:
+    from datetime import datetime
+
+    from homeassistant.util import dt as dt_util
+
+    from custom_components.thermocast.const import CONF_QUIET_FROM, CONF_QUIET_TO
+    from custom_components.thermocast.coordinator import ZoneRuntime
+    from custom_components.thermocast.core.model import OnlineZoneModel, ZoneSpec
+    from custom_components.thermocast.events import EventLog
+    from custom_components.thermocast.zone_actuator import ZoneActuator
+
+    from .conftest import ZONE_DATA
+
+    data = {**ZONE_DATA, CONF_BT_CONTROL: True, CONF_BT_ENTITY: BT, CONF_BASE_TEMP: 17.0,
+            CONF_QUIET_FROM: "12:00:00", CONF_QUIET_TO: "14:00:00"}
+    z = ZoneRuntime("kid", "Kind", data, OnlineZoneModel(ZoneSpec()))
+    hass.states.async_set(BT, "heat", {"temperature": 21.0})  # switched on by hand
+    async_mock_service(hass, "climate", "set_temperature")
+    modes = async_mock_service(hass, "climate", "set_hvac_mode")
+    act = ZoneActuator(hass, EventLog())
+    act.load({"kid": {"off": True}})
+    tz = dt_util.get_time_zone(hass.config.time_zone)
+    out = await act.async_apply(
+        {"kid": z}, {"kid": 20.0}, now=datetime(2026, 10, 12, 12, 30, tzinfo=tz),
+        block_on=False, failsafe=False, enabled=True,
+    )
+    assert out["kid"]["reason"] == "override" and modes == []

@@ -201,8 +201,11 @@ für die Wärmepumpe später COP(T_out, Vorlauf), Strompreis, PV-Überschuss.
   liefe der folgende Neustart < 15 min bis Blockende, endet der Block jetzt (`trim_tail_restart`, Ereignis
   `block_trimmed`) – spart den kurzen letzten Start.
 - BT-Aktor (opt-in je Zone): im Block Ladeziel (Obergrenze; fern vom Komfort oder kurz vor Komfortende Untergrenze), sonst Untergrenze; nur bei Änderung, 0,5-K-Schritte,
-  15–24 °C, ≤ 24/Tag; Handeingriff → Zone ruht bis Blockende (≥ 3 h); Ruhezeit: 15 min vorher Grundwert,
-  dann nichts (Ausnahme: führende Zone < Grundwert − 1 K); Steuerung aus/Entladen → Untergrenze.
+  15–24 °C, ≤ 24/Tag; Handeingriff → Zone ruht bis Blockende (≥ 3 h); Ruhezeit: 15 min vorher **BT aus**
+  (`hvac_mode off`, v0.8.8 – BT schickt die Raumtemperatur bei jeder Änderung + alle 30 min an den TRVZB, der dann
+  den Motor bewegt; Sollwert allein half nicht), dann nichts; Ausnahme: Raum < Grundwert − 1 K oder Temperatur
+  unbekannt → an auf Grundwert, aus erst wieder ab Grundwert; von Hand eingeschaltet = Handeingriff;
+  Steuerung aus/Entladen/Update-Fehler → an, Untergrenze (`hand_back`).
 
 ### Entitäten
 
@@ -287,6 +290,7 @@ Attr. Parameter + Sonnenantwort je Fläche).
   v0.8.5: Gewinn-Eingang der Vorhersage sättigt beim größten gesehenen Wert (σ-Band nach Gewinn-Reset ±20 K → normal).
   v0.8.6: neues Maximum skaliert den Effekt nicht mehr hoch (Warmstart lernte bei 1,5 W Standby), Gewinn-Varianz ≤ Prior.
   v0.8.7: Ereignis `window_open` beim Öffnen (Listener) statt beim Stundenabschluss (Panel zeigte 1 h zu spät + Wiederholungen).
+  v0.8.8: Ruhezeit schaltet BT aus (TRVZB bewegte den Motor nach BTs Temperatur-Updates, trotz unverändertem Sollwert).
   Erkenntnis an der Anlage: an milden Tagen liefert die witterungsgeführte Kurve kaum Vorlauf → Fußpunkt anheben
   (README); längere Fenster-Verzögerungen (0–3 h) getestet und verworfen (MAE minimal schlechter).
 - Bekannte Schwächen:

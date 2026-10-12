@@ -2,8 +2,11 @@
 
 During a heating block the room may charge up to its charge target (the upper bound, or only the base
 temperature when comfort is far away or about to end); otherwise it is held at its lower bound (comfort − band in comfort
-time, the base temperature outside). Quiet time: the base temperature
-is set once shortly before, then nothing is written (valve noise) – unless a leading zone gets cold.
+time, the base temperature outside). Quiet time: the thermostat is switched off shortly before (Better
+Thermostat keeps sending the room temperature to the TRV, and a regulating TRV answers that with valve
+noise; an off TRV stays shut and quiet), then nothing is written – unless the room gets cold (base − 1 K: on
+at the base until the base is reached again) or the temperature is unknown. ``hand_back`` (control off,
+unload, update error) always switches back on.
 """
 from __future__ import annotations
 
@@ -29,30 +32,32 @@ class BtInput:
     quiet_now: bool
     quiet_soon: bool  # quiet time starts within the lead time
     temp: float | None  # measured zone temperature
-    leads: bool
     last_written: float | None  # what Thermocast wrote last (None = nothing yet)
     writes_today: int
     window_open: bool = False  # a window of the zone is open: hold the base, never charge
+    last_off: bool = False  # Thermocast switched the thermostat off (quiet time)
+    hand_back: bool = False  # control off / unload / update error: thermostat on, at its lower bound
 
 
 def bt_decide(inp: BtInput) -> tuple[float | None, str]:
-    """(target to write or None, reason code)."""
-    if inp.temp is None:
-        return None, "no_temperature"
-    if inp.quiet_now or inp.quiet_soon:
-        target = round_target(inp.base)
-        cold = inp.quiet_now and inp.leads and inp.temp < inp.base - COLD_MARGIN
-        settled = inp.last_written is not None and abs(inp.last_written - target) < STEP / 2
-        # in quiet time only the base itself is written – once (a missed lead window must not leave the
-        # room at its upper bound all night), or again for a cold leading zone
-        if inp.quiet_now and settled and not cold:
+    """(target to write or None, reason code). Reason ``off``: switch the thermostat off (target None);
+    any target means: on (again) at that target."""
+    quiet = inp.quiet_now or inp.quiet_soon
+    if quiet and not inp.hand_back and inp.temp is not None:
+        # off ↔ on with hysteresis: off from the base up, on again below base − 1 K
+        warm = inp.temp >= inp.base - (COLD_MARGIN if inp.last_off else 0.0)
+        if warm and inp.last_off:
             return None, "quiet"
-    elif inp.window_open:
+        if warm:
+            return (None, "budget") if inp.writes_today >= MAX_WRITES_PER_DAY else (None, "off")
+    if inp.temp is None and not inp.last_off and not inp.hand_back:
+        return None, "no_temperature"
+    if quiet or inp.window_open:
         target = round_target(inp.base)
     else:
         target = round_target(inp.high if inp.block_on and not inp.failsafe else inp.floor_now)
-    if inp.last_written is not None and abs(inp.last_written - target) < STEP / 2:
+    if not inp.last_off and inp.last_written is not None and abs(inp.last_written - target) < STEP / 2:
         return None, "unchanged"
-    if inp.writes_today >= MAX_WRITES_PER_DAY:
+    if not inp.last_off and inp.writes_today >= MAX_WRITES_PER_DAY:
         return None, "budget"
     return target, "write"

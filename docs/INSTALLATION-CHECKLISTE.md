@@ -81,8 +81,11 @@ Eine Zone = ein Raum oder eine Gruppe von Räumen am selben Heizkreis. Faustrege
   Obergrenze, sonst die Untergrenze. Die TRVs selbst stellt weiter nur BT. **BT-Zeitpläne/Automationen für
   diese Räume deaktivieren**, sonst regeln zwei Stellen gegeneinander. Von Hand verstellt? Thermocast lässt
   den Raum bis zum Blockende (mindestens 3 h) in Ruhe.
-- **Ruhezeit** (z. B. Kinderzimmer 19–07 Uhr): 15 min vorher einmal Grundwert, danach keine Änderung mehr
-  (keine Stellgeräusche). Ausnahme: eine führende Zone fällt mehr als 1 K unter den Grundwert.
+- **Ruhezeit** (z. B. Kinderzimmer 19–07 Uhr): 15 min vorher wird das Thermostat **ausgeschaltet**, danach keine
+  Änderung mehr (keine Stellgeräusche – Better Thermostat schickt sonst weiter die Raumtemperatur an den TRV, und der
+  stellt nach). Ausnahme: der Raum fällt mehr als 1 K unter den Grundwert (dann an auf den Grundwert, bis er erreicht
+  ist). Steuerung aus, Entladen oder Update-Fehler schalten wieder ein. Bleibt HA in der Ruhezeit aus, bleibt der TRV aus
+  (Frostschutz des TRV).
   Mehrere Ruhefenster (z. B. Mittagsschlaf + Nacht, je Wochentag): einen **Zeitplan-Helfer** als
   „Ruhezeit-Zeitplan“ wählen – Ruhe gilt, wenn Zeitplan **oder** Von/Bis aktiv ist.
 - **Zonen, die ihr Ziel evtl. nicht erreichen** (z. B. Bad an einem FBH-Kreis mit Rücklaufbegrenzer):
