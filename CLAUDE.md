@@ -237,7 +237,9 @@ Attr. Parameter + Sonnenantwort je Fläche).
 - Läuft seit Oktober 2026 an der Referenzinstallation (echte EMS-ESP-Entitäten); Dev-Instanz: `./scripts/develop`.
 - Panel-Interna, die man kennen muss:
   - Story/Zeitachse zeigen den **Rollout**-Block (was passieren wird), die Kandidatentabelle die
-    aktuelle Einblock-Wahl des Planers (`explanation.planner_block`) – die können abweichen.
+    aktuelle Einblock-Wahl des Planers (`explanation.planner_block`) – die können abweichen (v. a. bei
+    Gleichstand, Starts-Gewicht 0: die Tabelle nennt dann die gleich teuren Startzeiten). Sensor „Nächster
+    Heizblock“ zeigt den Rollout-Block (`source: rollout`, Einblock-Wahl als `planner_block_*`), ohne View den Planer.
   - Im Beobachtungsmodus startet der Rollout vom **Schatten-Aktor** (`ViewBuilder._update_shadow`),
     sonst ignorierte er Mindestblock/-pause.
   - Periodische Coordinator-Refreshes sind Background-Tasks → in Tests
@@ -291,6 +293,7 @@ Attr. Parameter + Sonnenantwort je Fläche).
   v0.8.6: neues Maximum skaliert den Effekt nicht mehr hoch (Warmstart lernte bei 1,5 W Standby), Gewinn-Varianz ≤ Prior.
   v0.8.7: Ereignis `window_open` beim Öffnen (Listener) statt beim Stundenabschluss (Panel zeigte 1 h zu spät + Wiederholungen).
   v0.8.8: Ruhezeit schaltet BT aus (TRVZB bewegte den Motor nach BTs Temperatur-Updates, trotz unverändertem Sollwert).
+  v0.8.9: Sensor „Nächster Heizblock“ = Rollout-Block; Kandidaten-Tabelle nennt gleich teure Startzeiten (Gleichstand).
   Erkenntnis an der Anlage: an milden Tagen liefert die witterungsgeführte Kurve kaum Vorlauf → Fußpunkt anheben
   (README); längere Fenster-Verzögerungen (0–3 h) getestet und verworfen (MAE minimal schlechter).
 - Bekannte Schwächen:

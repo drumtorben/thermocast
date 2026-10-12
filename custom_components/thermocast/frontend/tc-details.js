@@ -13,6 +13,23 @@ class TcDetails extends LitElement {
     return `${fmtWhen(c.start, this.lang, this.tz, this.view.generated_at)}–${fmtTime(c.end, this.lang, this.tz)}`;
   }
 
+  // several start times with exactly the chosen cost: the shown start is only the earliest of them, the hourly
+  // re-planning decides – point to the block the controller is expected to run (rollout)
+  _tieNote(rows) {
+    const L = this.lang;
+    const chosen = rows.find((c) => c.chosen);
+    if (!chosen || !chosen.start) return nothing;
+    const ties = rows.filter((c) => c.start && Math.abs(c.cost - chosen.cost) < 0.005);
+    if (ties.length < 2) return nothing;
+    const starts = ties.map((c) => c.start).sort();
+    const from = fmtWhen(starts[0], L, this.tz, this.view.generated_at);
+    const to = fmtTime(starts[starts.length - 1], L, this.tz);
+    const nb = this.view.explanation?.next_block;
+    const expected =
+      nb && nb.start !== chosen.start ? " " + t(L, "c_tie_expected", { block: this._block(nb) }) : "";
+    return html`<p class="entity">${t(L, "c_tie", { n: ties.length, from, to })}${expected}</p>`;
+  }
+
   _candidates() {
     const L = this.lang;
     const rows = this.view.candidates;
@@ -36,6 +53,7 @@ class TcDetails extends LitElement {
     const title = (p) => [p.hint && t(L, p.hint), p.same && t(L, "c_same_hint")].filter(Boolean).join(" · ") || nothing;
     return html`<div class="card">
       <h3>${t(L, "candidates")}</h3>
+      ${this._tieNote(rows)}
       <div class="scroll">
         <table>
           <thead>

@@ -1,6 +1,7 @@
 """Sensors: forecast per zone, model diagnostics, next heating block."""
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
@@ -28,20 +29,50 @@ async def async_setup_entry(
 
 
 class NextBlockSensor(HouseEntity, SensorEntity):
+    """The block the controller is expected to run (rollout of the panel view). The planner's single-block
+    choice stays an attribute: with equal costs its start is only the earliest of several (re-planned hourly).
+    Without a view (not built yet, error) the planner's choice is the state."""
+
     _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_icon = "mdi:fire-circle"
 
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        # the view (rollout) is built in the background after each coordinator update
+        self.async_on_remove(self.coordinator.view_builder.async_add_listener(self.async_write_ha_state))
+
+    def _rollout_block(self) -> tuple[datetime | None, datetime | None] | None:
+        """(start, end) of the rollout's next block, (None, None) if it runs none, None without a view."""
+        view = self.coordinator.view_builder.view
+        if not view or "error" in view or "explanation" not in view:
+            return None
+        nb = view["explanation"].get("next_block")
+        if not nb:
+            return None, None
+        return datetime.fromisoformat(nb["start"]), datetime.fromisoformat(nb["end"])
+
+    def _block(self) -> tuple[datetime | None, datetime | None]:
+        d = self.coordinator.data
+        rollout = self._rollout_block()
+        if rollout is not None:
+            return rollout
+        return (d.block_start, d.block_end) if d else (None, None)
+
     @property
-    def native_value(self):
-        return self.coordinator.data.block_start if self.coordinator.data else None
+    def native_value(self) -> datetime | None:
+        return self._block()[0]
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         d = self.coordinator.data
         if d is None:
             return {}
+        end = self._block()[1]
         return {
-            "block_end": d.block_end.isoformat() if d.block_end else None,
+            "block_end": end.isoformat() if end else None,
+            "source": "planner" if self._rollout_block() is None else "rollout",
+            "planner_block_start": d.block_start.isoformat() if d.block_start else None,
+            "planner_block_end": d.block_end.isoformat() if d.block_end else None,
             "forecast_age_min": round(d.forecast_age_min, 1) if d.forecast_age_min is not None else None,
             "failsafe_reason": d.failsafe_reason,
         }

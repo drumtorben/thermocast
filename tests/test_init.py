@@ -94,6 +94,36 @@ async def test_setup_creates_entities(hass: HomeAssistant, mock_entry, mock_open
     assert device.via_device_id == house.id
 
 
+async def test_next_block_sensor_follows_rollout(hass: HomeAssistant, mock_entry, mock_open_meteo) -> None:
+    """The sensor shows the block the rollout expects; the planner's single-block choice can be a tie placeholder
+    (several start times with exactly the same cost) and stays an attribute. Without a view: the planner."""
+    await _setup_states(hass)
+    await _setup_entry(hass, mock_entry)
+    c = mock_entry.runtime_data
+    eid = _eid(hass, f"{mock_entry.entry_id}_next_block", "sensor")
+    vb = c.view_builder
+
+    block = {"start": "2026-10-13T04:00:00+00:00", "end": "2026-10-13T08:00:00+00:00"}
+    vb.view = {**vb.view, "explanation": {"code": "block_planned", "next_block": block}}
+    vb._notify()
+    st = hass.states.get(eid)
+    assert st.state == block["start"]
+    assert st.attributes["block_end"] == block["end"]
+    assert st.attributes["source"] == "rollout"
+    planner_start = c.data.block_start
+    assert st.attributes["planner_block_start"] == (planner_start.isoformat() if planner_start else None)
+
+    vb.view = {**vb.view, "explanation": {"code": "no_heating", "next_block": None}}  # rollout: nothing to do
+    vb._notify()
+    assert hass.states.get(eid).state == "unknown"
+
+    vb.view = {"error": "boom"}
+    vb._notify()
+    st = hass.states.get(eid)
+    assert st.attributes["source"] == "planner"
+    assert st.state == (planner_start.isoformat() if planner_start else "unknown")
+
+
 async def test_no_deprecation_warnings(hass: HomeAssistant, mock_entry, mock_open_meteo, caplog) -> None:
     await _setup_states(hass)
     await _setup_entry(hass, mock_entry)
