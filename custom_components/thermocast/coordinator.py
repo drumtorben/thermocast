@@ -628,6 +628,7 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
                 # aired again within the recovery hour: the temperature from before the first airing still counts
                 if z.window_before is None or not window_recovering(z.window_closed, now):
                     z.window_before = zone_temp(self.hass, z)
+                self.events.add(now, "window_open", zone=z.subentry_id)
             elif not is_open and z.window_open:
                 z.window_closed = now
                 detail = f"{z.window_before:.1f} °C" if z.window_before is not None else None
@@ -894,8 +895,6 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
         # the end temperature is disturbed too while a window is open or the air still recovers
         aired = any(acc["window"]) or z.window_seen or zone_airing(self.hass, z, now)
         valid = consecutive and t_out is not None and not aired and bool(irr or not z.model.spec.surfaces)
-        if any(acc["window"]):
-            self.events.add(dt_util.utcnow(), "window_open", zone=z.subentry_id, dedupe=timedelta(minutes=59))
         rec = HourRecord(
             temp=z.pending_temp if z.pending_temp is not None else temp_now,
             t_out=t_out if t_out is not None else float("nan"),

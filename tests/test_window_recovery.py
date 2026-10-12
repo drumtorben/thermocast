@@ -54,6 +54,8 @@ async def test_short_airing_between_updates(hass: HomeAssistant, window_entry, m
     hass.states.async_set("binary_sensor.window", "on")
     await hass.async_block_till_done()
     assert z.window_before == 21.0 and z.window_seen
+    ev = c.events.to_list()[-1]  # logged when it opens, not when the hour closes
+    assert ev["type"] == "window_open" and ev["zone"] == "zone_eg" and ev["time"].startswith("2026-10-08T05:32")
     freezer.tick(timedelta(minutes=10))
     _temps(hass, 20.0)
     hass.states.async_set("binary_sensor.window", "off")
@@ -77,6 +79,7 @@ async def test_short_airing_between_updates(hass: HomeAssistant, window_entry, m
         await _tick(hass, freezer, 15)
     log = z.log.to_list()
     assert log[-1]["t"].startswith("2026-10-08T06:00") and log[-1]["rec"]["valid"] is False
+    assert [e["type"] for e in c.events.to_list()].count("window_open") == 1  # closing hours add none
 
     # after the recovery hour the measurement counts again
     zi = build_plan_inputs(hass, c.zones, c.forecast, c.forecast.index_of(_now()), 6)[0]

@@ -214,7 +214,7 @@ Attr. Parameter + Sonnenantwort je Fläche).
 
 ---
 
-## 4. Status (v0.8.6)
+## 4. Status (v0.8.7)
 
 - ✅ Kern getestet auf synthetischen Daten: 1-Schritt-MAE ≈ 0,03 K/h, 24-h-Prognose-MAE ≈ 0,1 K,
   Ostfenster und Süddach werden getrennt gelernt, Planer heizt bei −5 °C, nicht bei 18 °C.
@@ -286,6 +286,7 @@ Attr. Parameter + Sonnenantwort je Fläche).
   klingt zum Tagesprofil ab; echtes Zonen-Log nachgespielt: 0,00017 K/h/W statt 0,0147, konstant 300 W → max. +1,1 K.
   v0.8.5: Gewinn-Eingang der Vorhersage sättigt beim größten gesehenen Wert (σ-Band nach Gewinn-Reset ±20 K → normal).
   v0.8.6: neues Maximum skaliert den Effekt nicht mehr hoch (Warmstart lernte bei 1,5 W Standby), Gewinn-Varianz ≤ Prior.
+  v0.8.7: Ereignis `window_open` beim Öffnen (Listener) statt beim Stundenabschluss (Panel zeigte 1 h zu spät + Wiederholungen).
   Erkenntnis an der Anlage: an milden Tagen liefert die witterungsgeführte Kurve kaum Vorlauf → Fußpunkt anheben
   (README); längere Fenster-Verzögerungen (0–3 h) getestet und verworfen (MAE minimal schlechter).
 - Bekannte Schwächen:
