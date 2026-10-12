@@ -294,6 +294,8 @@ Attr. Parameter + Sonnenantwort je Fläche).
   v0.8.7: Ereignis `window_open` beim Öffnen (Listener) statt beim Stundenabschluss (Panel zeigte 1 h zu spät + Wiederholungen).
   v0.8.8: Ruhezeit schaltet BT aus (TRVZB bewegte den Motor nach BTs Temperatur-Updates, trotz unverändertem Sollwert).
   v0.8.9: Sensor „Nächster Heizblock“ = Rollout-Block; Kandidaten-Tabelle nennt gleich teure Startzeiten (Gleichstand).
+  v0.8.10: KPI Heizgradtage Basis 16 °C (wie Zählerfit), kWh/HGT als Gerade kWh/Tag über HGT (Tage ≥ 1 K·d, ≥ 4 Tage,
+  ≥ 2 K·d Spanne) + Streudiagramm – der Quotient ist in der Übergangszeit überhöht (Haus heizt über der Basis).
   Erkenntnis an der Anlage: an milden Tagen liefert die witterungsgeführte Kurve kaum Vorlauf → Fußpunkt anheben
   (README); längere Fenster-Verzögerungen (0–3 h) getestet und verworfen (MAE minimal schlechter).
 - Bekannte Schwächen:

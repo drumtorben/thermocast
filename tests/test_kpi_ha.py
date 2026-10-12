@@ -71,7 +71,7 @@ async def test_kpis_from_statistics(hass: HomeAssistant, mock_entry: MockConfigE
     full = kpis["days"][1]  # 03.10. local: 24 hours inside the imported range
     assert full["complete"] is True
     assert full["starts"] == 24 and full["energy_kwh"] == 12.0
-    assert full["t_out_mean"] == 5.0 and full["hdd"] == 10.0 and full["kwh_per_hdd"] == 1.2
+    assert full["t_out_mean"] == 5.0 and full["hdd"] == 11.0 and full["kwh_per_hdd"] == pytest.approx(1.09)
     # comfort 00:00–23:59 in ZONE_DATA, 20.2 lower bound: min of both sensors' minimum
     assert full["min_leading"] == 19.9 and full["below_comfort_h"] == 0
     assert kpis["days"][2]["complete"] is False

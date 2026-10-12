@@ -7,6 +7,8 @@ from statistics import fmean
 from typing import Any
 
 HDD_MIN = 1.0  # K·d – below that, kWh per degree day is not meaningful
+FIT_MIN_DAYS = 4
+FIT_MIN_SPREAD = 2.0  # K·d between the coldest and the mildest heating day – else the slope is noise
 
 
 @dataclass
@@ -38,7 +40,7 @@ def daily_kpis(
     energy: dict[datetime, float] | None,
     t_out: dict[datetime, float] | None,
     zones: list[ZoneKpiInput],
-    hdd_base: float = 15.0,
+    hdd_base: float = 16.0,
 ) -> list[dict[str, Any]]:
     """One row per local day. Counter changes < 0 (resets) count as 0. Outdoor mean needs ≥ 18 hours."""
     starts_d = _by_day(starts or {}, tz)
@@ -85,6 +87,35 @@ def _mean(rows: list[dict[str, Any]], key: str) -> float | None:
     return fmean(vals) if vals else None
 
 
+def degree_day_fit(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Least-squares line kWh/day = intercept + slope·HDD over complete heating days (HDD ≥ HDD_MIN).
+
+    The slope is the heat loss per K·d and stays comparable between mild and cold weeks; the ratio
+    kWh/HDD is inflated in mild weeks when the house already heats above the degree-day base."""
+    pts = [
+        (r["hdd"], r["energy_kwh"])
+        for r in rows
+        if r["complete"] and r["hdd"] is not None and r["energy_kwh"] is not None and r["hdd"] >= HDD_MIN
+    ]
+    if len(pts) < FIT_MIN_DAYS:
+        return None
+    xs = [x for x, _ in pts]
+    if max(xs) - min(xs) < FIT_MIN_SPREAD:
+        return None
+    mx, my = fmean(xs), fmean(y for _, y in pts)
+    sxx = sum((x - mx) ** 2 for x in xs)
+    slope = sum((x - mx) * (y - my) for x, y in pts) / sxx
+    intercept = my - slope * mx
+    ss_tot = sum((y - my) ** 2 for _, y in pts)
+    ss_res = sum((y - intercept - slope * x) ** 2 for x, y in pts)
+    return {
+        "slope": _r(slope),
+        "intercept": _r(intercept, 1),
+        "n": len(pts),
+        "r2": _r(1.0 - ss_res / ss_tot) if ss_tot > 0 else None,
+    }
+
+
 def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
     """Averages over complete days; kWh per HDD as ratio of sums (robust against mild days)."""
     rows = [r for r in rows if r["complete"]]
@@ -99,6 +130,7 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
         "energy_per_day": _r(_mean(rows, "energy_kwh"), 1),
         "kwh_per_hdd": _r(sum(e for e, _ in pairs) / hdd_sum) if hdd_sum >= HDD_MIN else None,
         "hdd_sum": _r(sum(r["hdd"] for r in rows if r["hdd"] is not None), 1),
+        "fit": degree_day_fit(rows),
         "t_out_mean": _r(_mean(rows, "t_out_mean"), 1),
         "min_leading": _r(min(mins)) if mins else None,
         "below_comfort_h_per_day": _r(_mean(rows, "below_comfort_h"), 1),

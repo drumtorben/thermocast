@@ -79,4 +79,4 @@ DEFAULT_Q_ON = 10.0  # K, initial guess of the heating proxy while heating
 CONF_DHW_ENTITY = "dhw_active_entity"  # DHW charging active (hatching in the timeline)
 CONF_BURNER_STARTS = "burner_starts_entity"  # total_increasing counter (KPIs)
 CONF_HEAT_ENERGY = "heat_energy_entity"  # kWh, total_increasing (KPIs)
-HDD_BASE = 15.0  # °C heating limit for heating degree days
+HDD_BASE = 16.0  # °C heating limit for heating degree days

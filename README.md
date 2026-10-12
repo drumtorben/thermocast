@@ -160,7 +160,7 @@ heating, neighbours) with a 30-day history, screed lag profile, and a **JSON exp
 ![Model tab](docs/images/model.png)
 
 Tab **"KPIs"** (14/30/90 days, from the recorder's long-term statistics): burner starts/day, kWh per heating
-degree day, comfort – **before** and **since** control was enabled.
+degree day (a line kWh/day over degree days, base 16 °C), comfort – **before** and **since** control was enabled.
 
 <p>
   <img src="docs/images/kpis.png" width="58%" alt="KPI tab">

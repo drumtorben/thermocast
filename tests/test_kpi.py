@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from . import core_helpers  # noqa: F401
-from core.kpi import ZoneKpiInput, aggregate, daily_kpis, summary
+from core.kpi import ZoneKpiInput, aggregate, daily_kpis, degree_day_fit, summary
 
 TZ = ZoneInfo("Europe/Berlin")
 
@@ -34,7 +34,7 @@ def test_dst_day_has_25_hours_and_counts_once():
     )
     r = rows[0]
     assert r["starts"] == 25 and r["energy_kwh"] == 12.5
-    assert r["t_out_mean"] == 5.0 and r["hdd"] == 10.0 and r["kwh_per_hdd"] == 1.25
+    assert r["t_out_mean"] == 5.0 and r["hdd"] == 11.0 and r["kwh_per_hdd"] == pytest.approx(1.14)
     assert r["complete"] is True
 
 
@@ -54,7 +54,7 @@ def test_mild_day_has_no_kwh_per_hdd():
     d = date(2026, 6, 1)
     hours = _hours(d)
     rows = daily_kpis(days=[d], tz=TZ, today=date(2026, 6, 2), starts=None, energy={h: 0.1 for h in hours},
-                      t_out={h: 14.5 for h in hours}, zones=[])
+                      t_out={h: 15.5 for h in hours}, zones=[])
     assert rows[0]["hdd"] == 0.5 and rows[0]["kwh_per_hdd"] is None
 
 
@@ -84,3 +84,23 @@ def test_summary_before_after():
     assert s["after"]["kwh_per_hdd"] == 2.0 and s["before"]["min_leading"] == 20.1
     assert summary(rows, None)["before"] is None
     assert aggregate([]) is None
+
+
+def _day(i: int, hdd: float | None, kwh: float | None, complete: bool = True) -> dict:
+    return {"date": f"2026-11-{i:02d}", "complete": complete, "starts": 5.0, "energy_kwh": kwh, "t_out_mean": None,
+            "hdd": hdd, "kwh_per_hdd": None, "min_leading": None, "below_comfort_h": None}
+
+
+def test_degree_day_fit_recovers_line():
+    """kWh/day = a + b·HDD over heating days; mild days (HDD < 1), incomplete days and gaps stay out."""
+    rows = [_day(i, h, 4.0 + 5.5 * h) for i, h in enumerate((2.0, 4.0, 6.0, 8.0, 10.0), start=1)]
+    rows += [_day(6, 0.5, 30.0), _day(7, 9.0, 999.0, complete=False), _day(8, None, 20.0), _day(9, 5.0, None)]
+    fit = degree_day_fit(rows)
+    assert fit["slope"] == pytest.approx(5.5) and fit["intercept"] == pytest.approx(4.0)
+    assert fit["n"] == 5 and fit["r2"] == pytest.approx(1.0)
+    assert aggregate(rows)["fit"] == fit
+
+
+def test_degree_day_fit_needs_spread_and_days():
+    assert degree_day_fit([_day(i, 4.0 + i / 10, 30.0) for i in range(1, 8)]) is None  # HDD range < 2 K·d
+    assert degree_day_fit([_day(i, h, 5.0 * h) for i, h in enumerate((2.0, 5.0, 8.0), start=1)]) is None  # < 4 days

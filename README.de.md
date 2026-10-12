@@ -163,7 +163,7 @@ Tab **„Modell“** (je Zone): Wie gut beschreibt das Modell die Zone?
   Estrich-Verzögerungsprofil. **JSON-Export** aller Modellzustände und Logs (z. B. für polars).
 
 Tab **„KPIs“** (14/30/90 Tage, aus den Recorder-Langzeitstatistiken): Brennerstarts/Tag, kWh pro Heizgradtag
-(Heizgrenze 15 °C), Minimum der führenden Zonen in Komfortzeit, Unterschreitungsstunden – jeweils
+(Gerade kWh/Tag über Heizgradtagen, Heizgrenze 16 °C), Minimum der führenden Zonen in Komfortzeit, Unterschreitungsstunden – jeweils
 **vor** und **seit** dem ersten Einschalten der Steuerung. Dafür in den Optionen der Integration
 **Brennerstarts** und **Heizenergie** (beide `total_increasing`, z. B. von EMS-ESP) eintragen; optional
 **Warmwasser aktiv** für die Schraffur in der Zeitachse.
