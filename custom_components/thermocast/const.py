@@ -4,9 +4,14 @@ from __future__ import annotations
 from datetime import timedelta
 
 DOMAIN = "thermocast"
-PLATFORMS = ["sensor", "binary_sensor", "switch", "button"]
+PLATFORMS = ["sensor", "binary_sensor", "switch", "button", "datetime", "number"]
 
 SUBENTRY_ZONE = "zone"
+
+# vacation inputs (defaults in core/vacation.py)
+VACATION_FLOOR_MIN = 10.0
+VACATION_FLOOR_MAX = 20.0
+VACATION_LEAD_MAX_H = 48
 
 UPDATE_INTERVAL = timedelta(minutes=15)
 FORECAST_MAX_AGE = timedelta(minutes=60)

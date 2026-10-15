@@ -206,6 +206,9 @@
       },
       "heat_demand": {
         "name": "Heat demand"
+      },
+      "vacation_active": {
+        "name": "Vacation"
       }
     },
     "switch": {
@@ -216,6 +219,22 @@
     "button": {
       "warmstart": {
         "name": "Re-learn models from history"
+      }
+    },
+    "datetime": {
+      "vacation_start": {
+        "name": "Vacation departure"
+      },
+      "vacation_end": {
+        "name": "Vacation return"
+      }
+    },
+    "number": {
+      "vacation_floor": {
+        "name": "Vacation lower bound"
+      },
+      "vacation_lead": {
+        "name": "Vacation preheat lead"
       }
     }
   },

@@ -126,6 +126,21 @@ manual changes.
   doesn't fire at all. Fix: raise the curve's base point (e.g. ~30–35 °C at +20 °C outside). Between blocks the
   heating circuit is blocked anyway, so the higher base point practically only acts during a block.
 
+### Vacation
+
+Set **Vacation departure** and **Vacation return** (house device, `datetime`); it starts and ends by itself.
+
+- **Away:** no comfort time, every zone only holds **Vacation lower bound** (default 15 °C – it lowers a zone's
+  base temperature, never raises it); blocks don't charge above it + 1 K. Thermostats (Better Thermostat) follow.
+- **Preheat lead** (default 12 h): from return − lead the normal base temperature applies again, from the return
+  the comfort plan. The planner heats ahead so that the base holds from the start of the lead.
+- Choose the lead by the weather: floor heating gains only a few tenths of a kelvin per hour. On the synthetic house
+  12 h are enough at +5 °C but leave the return ~1 K short at −5 °C – take a longer lead or a higher lower bound
+  when it is cold. The panel shows the forecast for the return.
+- Fail-safes, minimum block/pause and EEPROM protection stay as they are; the models keep learning.
+- Hot water is not part of it – use the controller's own holiday program (RC310: holiday mode).
+- To cancel, set the return to now (or into the past); a past period is simply inactive.
+
 ### Example zones (surfaces as YAML in the "sunlit surfaces" field)
 
 Bedroom – east window, south roof slope:

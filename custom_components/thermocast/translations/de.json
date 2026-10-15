@@ -206,6 +206,9 @@
       },
       "heat_demand": {
         "name": "Heizbedarf"
+      },
+      "vacation_active": {
+        "name": "Urlaub"
       }
     },
     "switch": {
@@ -216,6 +219,22 @@
     "button": {
       "warmstart": {
         "name": "Modelle aus Historie neu lernen"
+      }
+    },
+    "datetime": {
+      "vacation_start": {
+        "name": "Urlaub Abreise"
+      },
+      "vacation_end": {
+        "name": "Urlaub Rückkehr"
+      }
+    },
+    "number": {
+      "vacation_floor": {
+        "name": "Urlaub Untergrenze"
+      },
+      "vacation_lead": {
+        "name": "Urlaub Vorlauf"
       }
     }
   },

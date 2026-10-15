@@ -26,6 +26,7 @@ from custom_components.thermocast.coordinator import (
     zone_base,
     zone_charge_cap,
     zone_charge_target,
+    zone_comfort,
     zone_floor,
     zone_high,
     zone_quiet,
@@ -211,6 +212,54 @@ async def test_starts_weight_option(hass: HomeAssistant, mock_entry: MockConfigE
     assert await hass.config_entries.async_setup(mock_entry.entry_id)
     await hass.async_block_till_done()
     assert {z.precharge_h for z in mock_entry.runtime_data.zones.values()} == {24}
+
+
+async def test_vacation_lowers_the_bounds(hass: HomeAssistant) -> None:
+    """away: no comfort, base min(base, vacation floor), upper bound base + 1 K; preheat: normal base, no comfort."""
+    from custom_components.thermocast.core.vacation import Vacation
+
+    z = _z(**{CONF_BT_CONTROL: True, CONF_BT_ENTITY: "climate.bt", CONF_COMFORT_HIGH: 22.5, CONF_BASE_TEMP: 18.0})
+    day = timedelta(days=1)
+    start, end = _local(hass, 8) + day, _local(hass, 18) + 4 * day  # Wed 08:00 → Sat 18:00
+    z.vacation = Vacation(start, end, floor=15.0, lead_h=12)
+    away, preheat, back = _local(hass, 12) + 2 * day, end - timedelta(hours=6), end + timedelta(hours=1)
+    assert zone_comfort(z, away) is None and zone_comfort(z, preheat) is None
+    assert zone_base(z, away) == 15.0 and zone_floor(z, away) == 15.0 and zone_high(z, away) == 16.0
+    assert zone_charge_target(z, away) == 15.0 and zone_charge_cap(z, away) == 15.0
+    assert zone_base(z, preheat) == 18.0 and zone_floor(z, preheat) == 18.0 and zone_high(z, preheat) == 22.5
+    assert zone_charge_target(z, preheat) == 22.5  # comfort after the return within precharge_h: charge
+    assert zone_floor(z, back) == 20.2 and zone_high(z, back) == 22.5
+    assert zone_base(z) == 18.0 and zone_high(z) == 22.5  # no time: no vacation
+    # the vacation never raises a bound
+    z.vacation = Vacation(start, end, floor=19.0)
+    assert zone_base(z, away) == 18.0 and zone_high(z, away) == 19.0
+
+
+async def test_no_charging_for_comfort_inside_the_vacation(hass: HomeAssistant) -> None:
+    """Before the departure a block charges only if comfort before the departure needs it."""
+    from custom_components.thermocast.core.vacation import Vacation
+
+    z = _z(**{CONF_BT_CONTROL: True, CONF_BT_ENTITY: "climate.bt", CONF_COMFORT_HIGH: 22.5, CONF_BASE_TEMP: 18.0})
+    assert zone_charge_target(z, _local(hass, 23)) == 22.5  # comfort at 06:00 tomorrow: precharge
+    z.vacation = Vacation(_local(hass, 23, 30), _local(hass, 12) + timedelta(days=7))
+    assert zone_charge_target(z, _local(hass, 23)) == 18.0  # tomorrow's comfort falls into the vacation
+
+
+async def test_plan_inputs_follow_the_vacation(hass: HomeAssistant) -> None:
+    from custom_components.thermocast.coordinator import build_plan_inputs
+    from custom_components.thermocast.core.forecast import Forecast
+    from custom_components.thermocast.core.vacation import Vacation
+
+    z = _z(**{CONF_COMFORT_HIGH: 22.5, CONF_BASE_TEMP: 18.0})
+    hass.states.async_set("sensor.living", "20.0")
+    hass.states.async_set("sensor.kitchen", "20.0")
+    t0 = datetime(2026, 10, 7, 6, tzinfo=UTC)
+    fc = Forecast(times=[t0 + timedelta(hours=h) for h in range(8)], t_out=[5.0] * 8, irr={}, fetched_at=t0)
+    z.vacation = Vacation(t0 + timedelta(hours=3), t0 + timedelta(days=5))
+    zi = build_plan_inputs(hass, {"z": z}, fc, 0, 6)[0]
+    # prediction h refers to the end of hour h: t0 + 3 h is the end of hour 2
+    assert zi.comfort_low[2:] == [15.0] * 4 and zi.comfort_high[2:] == [16.0] * 4
+    assert zi.comfort_high[0] == 22.5
 
 
 CONF_SURFACES_EMPTY = "surfaces"

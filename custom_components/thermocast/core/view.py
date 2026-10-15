@@ -9,6 +9,7 @@ from .explain import explain, robustness
 from .planner import CostFn, ZonePlanInput, default_cost, plan
 from .rollout import DEFAULT_BLOCK_LENGTHS, ActuatorState, RolloutResult, rollout, window
 from .rules import Rules
+from .vacation import Vacation
 
 VIEW_VERSION = 1
 HOUR = timedelta(hours=1)
@@ -263,6 +264,8 @@ def build_view(
     errors: list[str],
     dhw: list[float | None] | None = None,
     burner_starts: list[float | None] | None = None,  # burner starts per past hour (counter increase)
+    vacation: Vacation | None = None,
+    vacation_entity: str | None = None,  # the return's entity (the banner opens it)
 ) -> dict[str, Any]:
     n = len(window.hours)
     now = window.now_index
@@ -338,10 +341,24 @@ def build_view(
     explanation: dict[str, Any] = dict(outlook.explanation) if outlook else {"code": "no_forecast"}
     if outlook:
         explanation = _next_block_from_rollout(explanation, outlook, now, iso)
+    vac_now = vacation.phase(generated_at) if vacation else None
+    if vac_now == "away" and explanation.get("code") in ("no_need", "no_need_sun"):
+        explanation = {**explanation, "code": "vacation"}
     if decision.get("override") == "failsafe":
         explanation = {**explanation, "code": "failsafe", "reason": decision.get("failsafe_reason")}
 
     start, end = window.hours[0], window.end
+    vac_view = None
+    if vacation and vacation.relevant(generated_at):
+        vac_view = {
+            "start": vacation.start.isoformat(),
+            "end": vacation.end.isoformat(),
+            "preheat_from": vacation.preheat_from().isoformat(),
+            "floor": vacation.floor,
+            "phase": vac_now,
+            "entity": vacation_entity,
+            "hours": [vacation.phase(h + HOUR / 2) for h in window.hours],  # per hour (its middle)
+        }
     return {
         "version": VIEW_VERSION,
         "generated_at": generated_at.isoformat(),
@@ -369,4 +386,5 @@ def build_view(
         "days": days,
         "events": [e for e in events if start <= datetime.fromisoformat(e["time"]) < end],
         "errors": errors,
+        "vacation": vac_view,
     }

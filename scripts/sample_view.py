@@ -18,7 +18,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "custom_components" / "thermocast"))
+sys.path.append(str(ROOT / "custom_components" / "thermocast"))  # after the stdlib: `datetime.py` platform
 sys.path.insert(0, str(ROOT))
 
 from core.forecast import Forecast
@@ -28,6 +28,7 @@ from core.planner import ZonePlanInput, charge_cost
 from core.quality import ForecastLog, QualityInput, RingLog, hindcast, param_snapshot, zone_quality
 from core.rollout import ActuatorState, block_lengths_for
 from core.rules import Rules
+from core.vacation import Vacation
 from core.view import ZoneViewInput, build_view, compute_outlook, make_window
 from core.weather import OutdoorBias, weather_summary
 
@@ -188,6 +189,9 @@ def main() -> None:
             {"time": (w.hours[27] + timedelta(minutes=5)).isoformat(), "type": "forecast_failed"},
         ],
         errors=[],
+        # a trip from tomorrow afternoon (banner "upcoming", shaded on the timeline; the plan above ignores it)
+        vacation=Vacation(NOW + 20 * HOUR, NOW + 8 * 24 * HOUR),
+        vacation_entity="datetime.thermocast_vacation_return",
         dhw=dhw,
         burner_starts=[(2.0 if heating[i] and not (i and heating[i - 1]) else 0.5 if heating[i] else 0.0)
                        if i < now else None for i in range(n)],

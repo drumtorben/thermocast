@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, time, timedelta
 from functools import partial
 from statistics import fmean
@@ -14,7 +14,7 @@ from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.core import CALLBACK_TYPE, Event, EventStateChangedData, HomeAssistant, callback
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.helpers.event import async_track_point_in_utc_time, async_track_state_change_event
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
@@ -86,6 +86,7 @@ from .core.rules import (
     window_recovery_temp,
 )
 from .core.series import HourlyIntegral
+from .core.vacation import AWAY, Vacation
 from .core.weather import OutdoorBias
 from .events import EventLog
 from .view_builder import ViewBuilder
@@ -176,6 +177,7 @@ class ZoneRuntime:
     schedule_plan: dict[str, list[dict[str, Any]]] | None = None  # weekly plan of the comfort schedule
     quiet_plan: dict[str, list[dict[str, Any]]] | None = None  # weekly plan of the quiet-time schedule
     precharge_h: int = DEFAULT_PRECHARGE_H  # house option: charge in a block when comfort starts within this
+    vacation: Vacation = field(default_factory=Vacation)  # house-wide, set by the coordinator
     # airing (window entities, tracked by state change – a short airing often falls between two updates)
     window_open: bool = False
     window_seen: bool = False  # opened since the last sample
@@ -238,7 +240,9 @@ def _in_schedule(local: datetime, plan: dict[str, list[dict[str, Any]]]) -> bool
 
 def zone_comfort(z: ZoneRuntime, when: datetime) -> float | None:
     """Lower comfort bound at ``when`` (None outside comfort). A schedule helper, if configured and
-    readable, replaces the fixed from/until window."""
+    readable, replaces the fixed from/until window. No comfort during a vacation (incl. its preheat lead)."""
+    if z.vacation.phase(when):
+        return None
     local = dt_util.as_local(when)
     if z.schedule_plan is not None:
         active = _in_schedule(local, z.schedule_plan)
@@ -249,22 +253,30 @@ def zone_comfort(z: ZoneRuntime, when: datetime) -> float | None:
     return float(z.cfg[CONF_COMFORT_TEMP]) - float(z.cfg[CONF_COMFORT_BAND])
 
 
-def zone_high(z: ZoneRuntime) -> float:
-    """Upper bound: a block may charge the zone up to here (default comfort + 1 K)."""
+def _away(z: ZoneRuntime, when: datetime | None) -> bool:
+    return when is not None and z.vacation.phase(when) == AWAY
+
+
+def zone_high(z: ZoneRuntime, when: datetime | None = None) -> float:
+    """Upper bound: a block may charge the zone up to here (default comfort + 1 K); away on vacation the
+    lowered base + 1 K (never above the normal bound)."""
     value = z.cfg.get(CONF_COMFORT_HIGH)
-    return float(value) if value is not None else float(z.cfg[CONF_COMFORT_TEMP]) + DEFAULT_HIGH_OFFSET
+    high = float(value) if value is not None else float(z.cfg[CONF_COMFORT_TEMP]) + DEFAULT_HIGH_OFFSET
+    return min(high, zone_base(z, when) + DEFAULT_HIGH_OFFSET) if _away(z, when) else high
 
 
-def zone_base(z: ZoneRuntime) -> float:
-    """Lower bound outside comfort time (default comfort − 2 K)."""
+def zone_base(z: ZoneRuntime, when: datetime | None = None) -> float:
+    """Lower bound outside comfort time (default comfort − 2 K); away on vacation at most the vacation floor.
+    Without ``when`` the configured base (no vacation)."""
     value = z.cfg.get(CONF_BASE_TEMP)
-    return float(value) if value is not None else float(z.cfg[CONF_COMFORT_TEMP]) - DEFAULT_BASE_OFFSET
+    base = float(value) if value is not None else float(z.cfg[CONF_COMFORT_TEMP]) - DEFAULT_BASE_OFFSET
+    return min(base, z.vacation.floor) if _away(z, when) else base
 
 
 def zone_floor(z: ZoneRuntime, when: datetime) -> float:
     """Effective lower bound for the planner: comfort − band in comfort time, otherwise the base temperature."""
     low = zone_comfort(z, when)
-    return low if low is not None else zone_base(z)
+    return low if low is not None else zone_base(z, when)
 
 
 def zone_quiet(z: ZoneRuntime, when: datetime, lead: timedelta = timedelta(0)) -> bool:
@@ -289,8 +301,8 @@ def zone_charge_target(z: ZoneRuntime, when: datetime) -> float:
 
     if zone_comfort(z, when) is not None:
         ending = not comfort_in(CHARGE_MIN_COMFORT_H, max(CHARGE_MIN_COMFORT_H, z.precharge_h))
-        return zone_floor(z, when) if ending else zone_high(z)
-    return zone_high(z) if comfort_in(0, z.precharge_h) else zone_floor(z, when)
+        return zone_floor(z, when) if ending else zone_high(z, when)
+    return zone_high(z, when) if comfort_in(0, z.precharge_h) else zone_floor(z, when)
 
 
 def zone_charge_cap(z: ZoneRuntime, when: datetime) -> float | None:
@@ -298,7 +310,7 @@ def zone_charge_cap(z: ZoneRuntime, when: datetime) -> float | None:
     None = no thermostat control (the zone takes what it gets)."""
     if not z.cfg.get(CONF_BT_CONTROL):
         return None
-    return zone_base(z) if zone_quiet(z, when) else zone_charge_target(z, when)
+    return zone_base(z, when) if zone_quiet(z, when) else zone_charge_target(z, when)
 
 
 def zone_window_open(hass: HomeAssistant, z: ZoneRuntime) -> bool:
@@ -385,7 +397,6 @@ def build_plan_inputs(
             )
             for h in range(horizon)
         ]
-        high = zone_high(z)
         # an open window: the room cools by airing, not for lack of heat – it neither calls for a block nor
         # takes heat (its thermostat holds the base); after closing, it plans from the temperature before
         window = zone_window_open(hass, z)
@@ -394,8 +405,8 @@ def build_plan_inputs(
             ZonePlanInput(
                 name=sid, model=z.model, temp_now=temp, future=future,
                 comfort_low=[zone_floor(z, t) for t in ends],
-                comfort_high=[high] * horizon,
-                charge_cap=[zone_base(z) if window and c is not None else c for c in caps],
+                comfort_high=[zone_high(z, t) for t in ends],
+                charge_cap=[zone_base(z, t) if window and c is not None else c for c, t in zip(caps, starts)],
                 q_on=z.q_on, leads_release=bool(z.cfg.get(CONF_LEADS_RELEASE, True)) and not window,
                 std_scale=z.std_scale,
             )
@@ -424,6 +435,9 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
         self._outdoor_hour: datetime | None = None  # running hour of the outdoor sensor samples
         self._outdoor_acc: list[float] = []
         self.control_enabled = False  # observe mode by default
+        self.vacation = Vacation()
+        self._vacation_phase: str | None = None  # phase at the last update (events on change)
+        self._vacation_unsub: CALLBACK_TYPE | None = None  # refresh at the next phase boundary
         self.house_device_id: str | None = None  # set in async_setup_entry
         self._failsafe_active = False
         self.view_builder = ViewBuilder(self)
@@ -444,6 +458,9 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
         stored = await self.store.async_load() or {}
         logs = (await self.logs_store.async_load() or {}).get("zones", {})
         self.control_enabled = bool(stored.get("control_enabled", False))
+        vac = stored.get("vacation") or {}
+        self.vacation = Vacation.from_dict(vac)
+        self._vacation_phase = vac.get("phase")
         self.actuator.load(stored.get("actuator", {}))
         self.zone_actuator.load(stored.get("bt", {}))
         self.events.load(stored.get("events", []))
@@ -480,6 +497,7 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
             zr.flog.load(zlog.get("flog", {}))
             zr.params = list(zlog.get("params", []))[-PARAM_HISTORY_DAYS:]
             self._recalibrate(zr)
+            zr.vacation = self.vacation
             self.zones[subentry.subentry_id] = zr
         cs = stored.get("control_since")
         self.control_since = datetime.fromisoformat(cs) if cs else None
@@ -541,6 +559,7 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
     def _state_data(self) -> dict[str, Any]:
         return {
             "control_enabled": self.control_enabled,
+            "vacation": {**self.vacation.to_dict(), "phase": self._vacation_phase},
             "actuator": self.actuator.to_dict(),
             "bt": self.zone_actuator.to_dict(),
             "events": self.events.to_list(),
@@ -602,6 +621,63 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
             await self.zone_actuator.async_failsafe(self.zones, self.zone_temps())  # rooms at their lower bound
         await self.async_save()
         await self.async_request_refresh()
+
+    async def async_set_vacation(self, **changes: Any) -> None:
+        """Change the vacation (start, end, floor, lead_h): every zone follows, the plan is redone now."""
+        self.vacation = replace(self.vacation, **changes)
+        if (self.vacation.start or self.vacation.end) and not self.vacation.valid():
+            _LOGGER.info("Thermocast: vacation inactive – the return must be after the departure")
+        for z in self.zones.values():
+            z.vacation = self.vacation
+        self._schedule_vacation_tick()
+        await self.async_save()
+        self.async_update_listeners()  # the vacation entities show it now; the refresh below is debounced
+        await self.async_request_refresh()
+
+    @callback
+    def _schedule_vacation_tick(self) -> None:
+        """Refresh at the next phase boundary (departure, preheat, return) – not up to 15 min late."""
+        self._stop_vacation_tick()
+        now = dt_util.utcnow()
+        v = self.vacation
+        upcoming = [t for t in (v.start, v.preheat_from(), v.end) if v.valid() and t is not None and t > now]
+        if upcoming:
+            self._vacation_unsub = async_track_point_in_utc_time(self.hass, self._vacation_tick, min(upcoming))
+
+    @callback
+    def _vacation_tick(self, _now: datetime) -> None:
+        self._vacation_unsub = None
+        self._schedule_vacation_tick()
+        self.config_entry.async_create_background_task(
+            self.hass, self.async_request_refresh(), "thermocast_vacation_phase"
+        )
+
+    @callback
+    def async_track_vacation(self) -> CALLBACK_TYPE:
+        """Refresh at each vacation phase boundary; returns the unsubscribe."""
+        self._schedule_vacation_tick()
+        return self._stop_vacation_tick
+
+    @callback
+    def _stop_vacation_tick(self) -> None:
+        if self._vacation_unsub:
+            self._vacation_unsub()
+            self._vacation_unsub = None
+
+    def _track_vacation(self, now: datetime) -> None:
+        """Events when the vacation phase changes."""
+        phase = self.vacation.phase(now)
+        if phase == self._vacation_phase:
+            return
+        if phase is None:
+            self.events.add(now, "vacation_end")
+        elif phase == AWAY:
+            self.events.add(now, "vacation_start", detail=f"{self.vacation.floor:.1f} °C")
+        else:
+            if self._vacation_phase is None:  # the lead covers the whole trip: start and preheat at once
+                self.events.add(now, "vacation_start", detail=f"{self.vacation.floor:.1f} °C")
+            self.events.add(now, "vacation_preheat")
+        self._vacation_phase = phase
 
     def zone_temps(self) -> dict[str, float | None]:
         return {sid: zone_temp(self.hass, z) for sid, z in self.zones.items()}
@@ -759,6 +835,7 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
 
         await self._ensure_forecast(now)
         await self._ensure_schedules(hour)
+        self._track_vacation(now)
 
         t_out = _num(hass, data.get(CONF_OUTDOOR_SENSOR))
         self._track_outdoor(hour, t_out)

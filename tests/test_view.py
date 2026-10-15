@@ -35,7 +35,7 @@ def _comfort_at(t):
     return 20.0 if 6 <= t.astimezone(TZ).hour < 22 else None
 
 
-def _view(t_out=-3.0, hours_avail=60, outlook=True, decision=None, now=NOW):
+def _view(t_out=-3.0, hours_avail=60, outlook=True, decision=None, now=NOW, vacation=None):
     w = make_window(now, TZ, "Europe/Berlin")
     n = len(w.hours)
     times = [w.hours[w.now_index] + timedelta(hours=h + 1) for h in range(hours_avail)]
@@ -67,7 +67,7 @@ def _view(t_out=-3.0, hours_avail=60, outlook=True, decision=None, now=NOW):
         plan_change=None,
         events=[{"time": (now - timedelta(hours=3)).isoformat(), "type": "window_open", "zone": "eg"},
                 {"time": (now - timedelta(days=5)).isoformat(), "type": "control_on"}],
-        errors=[],
+        errors=[], vacation=vacation, vacation_entity="datetime.thermocast_vacation_return" if vacation else None,
     )
     return w, view
 
@@ -216,6 +216,25 @@ def test_short_forecast_and_no_outlook():
 def test_failsafe_overrides_explanation():
     _, v = _view(decision={"override": "failsafe", "failsafe_reason": "no_temperature:EG"})
     assert v["explanation"]["code"] == "failsafe" and v["explanation"]["reason"] == "no_temperature:EG"
+
+
+def test_vacation_field_and_story_code():
+    from core.vacation import Vacation
+
+    _, plain = _view(t_out=18.0)
+    assert plain["vacation"] is None and plain["explanation"]["code"] in ("no_need", "no_need_sun")
+    vac = Vacation(NOW - timedelta(hours=2), NOW + timedelta(hours=24), floor=15.0, lead_h=12)
+    w, v = _view(t_out=18.0, vacation=vac)
+    assert v["explanation"]["code"] == "vacation"
+    f = v["vacation"]
+    assert f["phase"] == "away" and f["floor"] == 15.0 and f["entity"] == "datetime.thermocast_vacation_return"
+    assert f["preheat_from"] == (NOW + timedelta(hours=12)).isoformat()
+    assert len(f["hours"]) == len(w.hours)
+    assert f["hours"][w.now_index] == "away" and f["hours"][w.now_index + 13] == "preheat"
+    assert f["hours"][0] is None and f["hours"][w.now_index + 25] is None
+    json.dumps(v)
+    _, past = _view(vacation=Vacation(NOW - timedelta(days=9), NOW - timedelta(days=2)))
+    assert past["vacation"] is None
 
 
 def test_dst_day_view():

@@ -67,7 +67,8 @@ custom_components/thermocast/
 │   ├── series.py         # Stundenmittel / An-Anteil aus Zustandsfolgen (Recorder)
 │   ├── view.py           # Panel-View-Vertrag v1 (Fenster, Tageskarten, Kandidaten)
 │   ├── quality.py        # Stunden-/Prognose-Log, Hindcast, Fehlermaße, Parameter lesen, zone_quality()
-│   └── kpi.py            # Tages-KPIs aus Stundenstatistiken (Starts, kWh/HGT, Komfort), vorher/nachher
+│   ├── kpi.py            # Tages-KPIs aus Stundenstatistiken (Starts, kWh/HGT, Komfort), vorher/nachher
+│   └── vacation.py       # Urlaub: Zeitraum, Phase away/preheat, Untergrenze, Vorlauf
 ├── coordinator.py        # 15-min-Loop: Sensoren → Stunden-Sample → RLS-Update → Prognose → Plan → Aktor
 │                         #   + Stunden-Log, Param-Snapshots, control_since (alles im Store)
 ├── actuator.py           # Freigabe schalten: Mindestblock/-pause, Tagesbudget, Fail-safe
@@ -210,14 +211,15 @@ für die Wärmepumpe später COP(T_out, Vorlauf), Strompreis, PV-Überschuss.
 ### Entitäten
 
 House: `switch` Steuerung aktiv, `binary_sensor` Heizfreigabe (Planerwunsch),
-`sensor` Nächster Heizblock (Timestamp, Attr. Ende/Prognose-Alter/Fail-safe-Grund).
+`sensor` Nächster Heizblock (Timestamp, Attr. Ende/Prognose-Alter/Fail-safe-Grund),
+Urlaub: `datetime` Abreise/Rückkehr, `number` Untergrenze/Vorlauf, `binary_sensor` Urlaub (Attr. `phase`).
 Zone (Subentry-Device): `sensor` Prognose-Minimum (Attr. `forecast`: [{time, mean, lower,
 comfort_low}] für ApexCharts), `binary_sensor` Heizbedarf, `sensor` Modellfehler (Diagnose,
 Attr. Parameter + Sonnenantwort je Fläche).
 
 ---
 
-## 4. Status (v0.8.7)
+## 4. Status (v0.9.0)
 
 - ✅ Kern getestet auf synthetischen Daten: 1-Schritt-MAE ≈ 0,03 K/h, 24-h-Prognose-MAE ≈ 0,1 K,
   Ostfenster und Süddach werden getrennt gelernt, Planer heizt bei −5 °C, nicht bei 18 °C.
@@ -298,6 +300,13 @@ Attr. Parameter + Sonnenantwort je Fläche).
   ≥ 2 K·d Spanne) + Streudiagramm – der Quotient ist in der Übergangszeit überhöht (Haus heizt über der Basis).
   Erkenntnis an der Anlage: an milden Tagen liefert die witterungsgeführte Kurve kaum Vorlauf → Fußpunkt anheben
   (README); längere Fenster-Verzögerungen (0–3 h) getestet und verworfen (MAE minimal schlechter).
+  v0.9.0: Urlaubsmodus (Spec `…2026-10-15-vacation-mode-design.md`): Zeitraum + Untergrenze (15 °C) + Vorlauf (12 h)
+  als House-Entitäten, `core/vacation.py`; `away` = kein Komfort, Grundwert `min(Grundwert, Urlaub)`, Obergrenze +1 K;
+  `preheat` (Rückkehr − Vorlauf) = normaler Grundwert, kein Komfort. Wirkt nur über `zone_comfort/zone_base/zone_high`
+  (letztere mit `when`; ohne `when` kein Urlaub). Refresh exakt an den Phasengrenzen, Ereignisse `vacation_*`,
+  Panel-Banner + Hinterlegung. Synthetisch: 12 h Vorlauf reichen bei +5 °C, bei −5 °C fehlt bei Rückkehr ~1 K.
+  Tests hängen `custom_components/thermocast` jetzt **hinten** an `sys.path` (Plattform `datetime.py` überdeckte sonst
+  das stdlib-Modul).
 - Bekannte Schwächen:
   - Prognose nutzt aktuelle Nachbartemperaturen als konstant über den Horizont (Gewinne: Tagesprofil, s. o.).
   - Ein Gerät, das kühlt (z. B. Klimagerät im Sommer), meldet als Leistungssensor positive Watt – Gewinne sind ≥ 0;

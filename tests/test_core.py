@@ -7,7 +7,8 @@ import sys
 import numpy as np
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "custom_components", "thermocast"))
+# appended, not prepended: the integration has a `datetime.py` platform that must not shadow the stdlib
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "custom_components", "thermocast"))
 sys.path.insert(0, os.path.dirname(__file__))
 
 from core.forecast import compass_to_open_meteo

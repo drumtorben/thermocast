@@ -126,7 +126,7 @@ class ZoneActuator:
             quiet_now = zone_quiet(z, now)
             inp = BtInput(
                 block_on=block_on, failsafe=failsafe, floor_now=zone_floor(z, now), high=zone_charge_target(z, now),
-                base=zone_base(z), quiet_now=quiet_now, quiet_soon=not quiet_now and zone_quiet(z, now, QUIET_LEAD),
+                base=zone_base(z, now), quiet_now=quiet_now, quiet_soon=not quiet_now and zone_quiet(z, now, QUIET_LEAD),
                 temp=temps.get(zid), window_open=zone_window_open(self.hass, z),
                 # observe mode compares with what the thermostat has – nothing of ours was written
                 last_written=s.last_written if enabled else current, writes_today=s.writes_today,

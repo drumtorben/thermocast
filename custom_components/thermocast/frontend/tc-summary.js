@@ -128,11 +128,30 @@ class TcSummary extends LitElement {
     return chips;
   }
 
+  _vacation() {
+    const v = this.view.vacation;
+    if (!v) return nothing;
+    const L = this.lang;
+    const args = {
+      start: this._when(v.start),
+      end: fmtWhen(v.end, L, this.tz, this.view.generated_at),
+      preheat: this._when(v.preheat_from),
+      floor: fmtNum(v.floor, L),
+    };
+    const text = t(L, v.phase ? "vacation_" + v.phase : "vacation_upcoming", args);
+    // the vacation is set on the house device's entities: a click opens the return
+    const open = () =>
+      v.entity &&
+      this.dispatchEvent(new CustomEvent("hass-more-info", { detail: { entityId: v.entity }, bubbles: true, composed: true }));
+    return html`<div class="vacation ${v.entity ? "link" : ""}" @click=${open}>${text}</div>`;
+  }
+
   render() {
     if (!this.view) return nothing;
     const overrideNote = this._overrideNote();
     return html`
       <div class="card">
+        ${this._vacation()}
         <div class="headline">${this._headline()}</div>
         <p class="why">${this._sentence()}</p>
         ${overrideNote} ${this._btNotes()} ${this._planChange()}
@@ -150,6 +169,15 @@ class TcSummary extends LitElement {
     .headline {
       font-size: 22px;
       font-weight: 600;
+    }
+    .vacation {
+      margin: 0 0 10px;
+      padding: 6px 12px;
+      border-radius: 8px;
+      background: rgba(86, 180, 233, 0.18);
+    }
+    .vacation.link {
+      cursor: pointer;
     }
     .why {
       margin: 8px 0 0;

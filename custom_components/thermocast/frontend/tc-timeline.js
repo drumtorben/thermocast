@@ -191,11 +191,27 @@ class TcTimeline extends LitElement {
     return out;
   }
 
+  // [start, end, phase] runs of the vacation (away darker than the preheat lead)
+  _vacationRuns() {
+    const hours = this.view.vacation?.hours ?? [];
+    const out = [];
+    hours.forEach((p, i) => {
+      const last = out[out.length - 1];
+      if (!p) return;
+      if (last && last[2] === p && last[1] === i) last[1] = i + 1;
+      else out.push([i, i + 1, p]);
+    });
+    return out;
+  }
+
   _frame(h, body, label) {
     const nowX = this._x(this._nowPos());
     const hi = this.hoverIndex;
     return html`<svg width=${this._w} height=${h} @mousemove=${(e) => this._onMove(e)} @click=${(e) => this._onMove(e)}>
       <rect class="past" x=${this._x(0)} y="0" width=${Math.max(0, nowX - this._x(0))} height=${h}></rect>
+      ${this._vacationRuns().map(
+        ([s, e, phase]) => svg`<rect class="vac ${phase}" x=${this._x(s)} y="0" width=${(e - s) * this._pph} height=${h}></rect>`,
+      )}
       ${this._days()
         .slice(1)
         .map((d) => svg`<line class="day" x1=${this._x(d.start)} x2=${this._x(d.start)} y1="0" y2=${h}></line>`)}
@@ -507,6 +523,9 @@ class TcTimeline extends LitElement {
         ${this.view.zones.some((z) => (z.quiet || []).some(Boolean))
           ? html`<span><i style="background:var(--divider-color,#ccc)"></i>${t(this.lang, "quiet")}</span>`
           : nothing}
+        ${this._vacationRuns().length
+          ? html`<span><i style="background:rgba(86,180,233,0.45)"></i>${t(this.lang, "vacation_lane")}</span>`
+          : nothing}
         <span><i style="background:${C.heat}"></i>${t(this.lang, "heating")}</span>
         <span><i style="background:${C.outdoor}"></i>${t(this.lang, "t_out")}</span>
       </div>
@@ -534,6 +553,13 @@ class TcTimeline extends LitElement {
     .past {
       fill: var(--primary-text-color, #000);
       opacity: 0.04;
+    }
+    .vac {
+      fill: rgb(86, 180, 233);
+      opacity: 0.14;
+    }
+    .vac.preheat {
+      opacity: 0.06;
     }
     .day {
       stroke: var(--primary-text-color, #000);

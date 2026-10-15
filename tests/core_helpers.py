@@ -5,7 +5,8 @@ import os
 import sys
 from functools import lru_cache
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "custom_components", "thermocast"))
+# appended, not prepended: the integration has a `datetime.py` platform that must not shadow the stdlib
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "custom_components", "thermocast"))
 
 from core.model import HourRecord, OnlineZoneModel, SurfaceSpec, ZoneSpec
 

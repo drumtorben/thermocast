@@ -358,11 +358,11 @@ class ViewBuilder:
             bt_eid = z.cfg.get(CONF_BT_ENTITY) if z.cfg.get(CONF_BT_CONTROL) else None
             if bt_eid:
                 bt_on = [round_target(cap) if (cap := zone_charge_cap(z, h)) is not None else None for h in hours]
-                bt_off = [round_target(zone_base(z) if q else f) for q, f in zip(quiet, floor)]
+                bt_off = [round_target(zone_base(z, h) if q else f) for h, q, f in zip(hours, quiet, floor)]
                 if zone_window_open(hass, z):  # same as the actuator: the base while airing (from now on)
-                    base = round_target(zone_base(z))
-                    bt_on = bt_on[: window.now_index] + [base] * (n - window.now_index)
-                    bt_off = bt_off[: window.now_index] + [base] * (n - window.now_index)
+                    base = [round_target(zone_base(z, h)) for h in hours]
+                    bt_on = bt_on[: window.now_index] + base[window.now_index :]
+                    bt_off = bt_off[: window.now_index] + base[window.now_index :]
                 bt_past = hourly_mean(bt_hist.get(bt_eid, []), hours, now)
             zones.append(
                 ZoneViewInput(
@@ -370,7 +370,7 @@ class ViewBuilder:
                     leads=bool(z.cfg.get(CONF_LEADS_RELEASE, True)), measured=measured,
                     comfort_low=[zone_comfort(z, h) for h in hours], group_labels=group_labels,
                     contrib_past=contrib_past, forecast6=forecast6,
-                    comfort_high=[zone_high(z)] * n, floor=floor, quiet=quiet, bt_control=bool(bt_eid),
+                    comfort_high=[zone_high(z, h) for h in hours], floor=floor, quiet=quiet, bt_control=bool(bt_eid),
                     bt_on=bt_on, bt_off=bt_off, bt_past=bt_past,
                 )
             )
@@ -382,4 +382,8 @@ class ViewBuilder:
             z=zval, decision=self._decision(now, data), plan_change=change, events=self._events(), errors=errors,
             dhw=fraction_of(dhw_eid, binary_value) if dhw_eid else None,
             burner_starts=hourly_increase(states.get(starts_eid, []), hours, now) if starts_eid else None,
+            vacation=c.vacation,
+            vacation_entity=er.async_get(hass).async_get_entity_id(
+                "datetime", DOMAIN, f"{c.config_entry.entry_id}_vacation_end"
+            ),
         )
