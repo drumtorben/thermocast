@@ -109,3 +109,30 @@ async def test_failsafe_still_releases_on_vacation(hass: HomeAssistant, mock_ent
     await mock_entry.runtime_data.async_refresh()
     release = hass.states.get(_eid(hass, f"{mock_entry.entry_id}_heating_release", "binary_sensor"))
     assert release.state == STATE_ON and release.attributes["failsafe_reason"] == "no_temperature:EG"
+
+
+async def _lose_forecast(hass, mock_entry, mock_open_meteo, aioclient_mock, freezer, temp: float) -> object:
+    freezer.move_to(NOW)
+    mock_open_meteo(-5.0)
+    await _setup_states(hass, temp=temp)
+    await _setup_entry(hass, mock_entry)
+    await _set_period(hass, _ids(hass, mock_entry.entry_id), NOW - timedelta(hours=1), NOW + timedelta(days=7))
+    aioclient_mock.clear_requests()
+    aioclient_mock.get("https://api.open-meteo.com/v1/forecast", status=503)
+    freezer.tick(timedelta(hours=3))  # forecast older than the fail-safe limit
+    await mock_entry.runtime_data.async_refresh()
+    return hass.states.get(_eid(hass, f"{mock_entry.entry_id}_heating_release", "binary_sensor"))
+
+
+async def test_away_forecast_lost_warm_rooms_no_failsafe(
+    hass: HomeAssistant, mock_entry, mock_open_meteo, aioclient_mock, freezer
+) -> None:
+    release = await _lose_forecast(hass, mock_entry, mock_open_meteo, aioclient_mock, freezer, temp=20.0)
+    assert release.state == STATE_OFF and release.attributes["failsafe_reason"] is None
+
+
+async def test_away_forecast_lost_cold_room_still_failsafe(
+    hass: HomeAssistant, mock_entry, mock_open_meteo, aioclient_mock, freezer
+) -> None:
+    release = await _lose_forecast(hass, mock_entry, mock_open_meteo, aioclient_mock, freezer, temp=16.0)
+    assert release.state == STATE_ON and release.attributes["failsafe_reason"] == "no_forecast"

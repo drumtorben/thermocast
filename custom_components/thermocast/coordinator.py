@@ -71,6 +71,7 @@ from .const import (
     STORAGE_VERSION,
     SUBENTRY_ZONE,
     UPDATE_INTERVAL,
+    VACATION_NO_FORECAST_MARGIN,
 )
 from .core.forecast import Forecast, fetch_forecast
 from .core.model import HourRecord, OnlineZoneModel, SurfaceSpec, ZoneSpec, gain_path, typical_gains, update_q_on
@@ -1038,6 +1039,17 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
             _LOGGER.warning("Open-Meteo forecast failed: %s", err)
             self.events.add(dt_util.utcnow(), "forecast_failed", detail=str(err)[:120], dedupe=timedelta(hours=1))
 
+    def _away_without_need(self, now: datetime) -> bool:
+        """Away on vacation, every zone measured and ≥ ``VACATION_NO_FORECAST_MARGIN`` above its floor: a lost
+        forecast does not force heating (rooms cool ~1 K/day); a missing sensor or a cold room still does."""
+        if not self.zones:
+            return False
+        for z in self.zones.values():
+            temp = zone_temp(self.hass, z)
+            if temp is None or not _away(z, now) or temp < zone_base(z, now) + VACATION_NO_FORECAST_MARGIN:
+                return False
+        return True
+
     async def _forecast_and_plan(self, now: datetime) -> dict[str, Any]:
         hass = self.hass
         zones_out: dict[str, ZoneResult] = {}
@@ -1045,6 +1057,8 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
         if fc is None or fc.fetched_at is None or now - fc.fetched_at > FORECAST_STALE_FAILSAFE:
             for sid, z in self.zones.items():
                 zones_out[sid] = ZoneResult(temp=z.pending_temp, mae=z.model.mae, n_updates=z.model.n_updates)
+            if self._away_without_need(now):  # nothing to plan: every room is far above the vacation floor
+                return {"zones": zones_out, "want_heat": False, "failsafe": None, "block_start": None, "block_end": None}
             return {"zones": zones_out, "want_heat": True, "failsafe": "no_forecast", "block_start": None, "block_end": None}
 
         idx0 = fc.index_of(now)

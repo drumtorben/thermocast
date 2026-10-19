@@ -16,6 +16,7 @@ VACATION_LEAD_MAX_H = 48
 UPDATE_INTERVAL = timedelta(minutes=15)
 FORECAST_MAX_AGE = timedelta(minutes=60)
 FORECAST_STALE_FAILSAFE = timedelta(hours=2)
+VACATION_NO_FORECAST_MARGIN = 2.0  # K above the vacation floor: without forecast, away rooms may cool freely
 HORIZON_HOURS = 24
 STORAGE_VERSION = 1
 
