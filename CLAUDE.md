@@ -219,7 +219,7 @@ Attr. Parameter + Sonnenantwort je Fläche).
 
 ---
 
-## 4. Status (v0.9.2)
+## 4. Status (v0.9.3)
 
 - ✅ Kern getestet auf synthetischen Daten: 1-Schritt-MAE ≈ 0,03 K/h, 24-h-Prognose-MAE ≈ 0,1 K,
   Ostfenster und Süddach werden getrennt gelernt, Planer heizt bei −5 °C, nicht bei 18 °C.
@@ -311,6 +311,9 @@ Attr. Parameter + Sonnenantwort je Fläche).
   Nacht-Komfort), setzen weder den spätesten Start noch die Zehrzeit (`_reachable`: Heizen von jetzt bis Horizontende
   hebt die Stunde nicht an); Begründung nennt zuerst eine verhinderbare Unterschreitung. Anlass: Block 4–6 Uhr wegen
   einer Ruhezeit-Unterschreitung um 5 Uhr, gebraucht wurde er für das Wohnzimmer am Nachmittag.
+  v0.9.3: `_reachable` heizt jede Stunde, deren Deckel über dem freien Verlauf liegt (ein Durchlauf) – nicht
+  `heating_batch` über den ganzen Horizont: dessen erster Durchlauf überschoss den Deckel, das Ventil blieb für immer
+  zu, und der Vormittagsbedarf einer nachts gedeckelten Zone galt als unverhinderbar.
 - Bekannte Schwächen:
   - Prognose nutzt aktuelle Nachbartemperaturen als konstant über den Horizont (Gewinne: Tagesprofil, s. o.).
   - Ein Gerät, das kühlt (z. B. Klimagerät im Sommer), meldet als Leistungssensor positive Watt – Gewinne sind ≥ 0;

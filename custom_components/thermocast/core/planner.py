@@ -262,14 +262,18 @@ def _coast_beyond(preds: dict[str, Prediction], zones: list[ZonePlanInput], z: f
 
 
 def _reachable(zones: list[ZonePlanInput], free: dict[str, Prediction], horizon: int) -> dict[str, set[int]]:
-    """Hours a block can warm at all: heating from now through the horizon (an upper bound for every block) lifts
-    them above the free run. A room in its quiet time (thermostat off, capped at its base) falls below a night
-    comfort no block prevents – such hours must not set the latest start or cut a block's coast short."""
+    """Hours a block can warm at all: heating every hour whose cap lies above the free run (an upper bound for every
+    block) lifts them above the free run. A room in its quiet time (thermostat off, capped at its base) falls below
+    a night comfort no block prevents – such hours must not set the latest start or cut a block's coast short.
+    Not ``heating_batch`` over the whole horizon: its first pass overshoots the cap and the valve stays shut."""
     out: dict[str, set[int]] = {}
     if horizon <= 0:
         return out
     for zz in zones:
-        _, mean, _ = zz.heating_batch([Candidate(0, horizon)])
+        n = len(zz.future)
+        start_temp = [zz.temp_now, *free[zz.name].mean[:-1]]
+        open_ = [(c := zz.cap_at(i)) is None or start_temp[i] < c for i in range(n)]
+        mean, _ = zz.predict_batch(np.where(np.array([open_]), zz.q_on, 0.0))
         out[zz.name] = {i for i in range(horizon) if mean[0, i] > free[zz.name].mean[i] + 1e-6}
     return out
 

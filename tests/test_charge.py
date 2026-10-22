@@ -258,3 +258,17 @@ def test_violation_in_quiet_time_does_not_pull_the_block_forward():
     assert res.best.start is not None and res.best.start >= 6
     ex = explain(res, [lead, room], datetime(2026, 10, 22, 18, tzinfo=UTC), 0.0)
     assert ex["driver"] == "wz"
+
+
+def test_violation_after_a_low_cap_stays_reachable():
+    """Real case (0.9.2): a radiator room capped at its base overnight, comfort from the morning. Heating the whole
+    horizon overshot the cap in the first pass, the valve stayed shut for good and the morning violation counted as
+    unpreventable – the planner ignored the room."""
+    room = _zone(t_out=3.0, temp=20.3, hours=24, radiator=True)
+    room = type(room)(**{**room.__dict__, "name": "bu", "comfort_low": [None] * 12 + [20.2] * 6 + [None] * 6,
+                         "charge_cap": [15.0] * 8 + [21.0] * 16})
+    viol = violations(room.predict(room.future), room.comfort_low, 0.0)
+    assert viol
+    res = plan([room], cost_fn=charge_cost(0.0), z=0.0)
+    assert {i for i, _ in viol} <= res.reachable["bu"]
+    assert res.best.start is not None
