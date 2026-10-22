@@ -19,10 +19,17 @@ def explain(first: PlanResult, zones: list[ZonePlanInput], hour0: datetime, z: f
     driver: str | None = None
     first_i: int | None = None
     deficit = 0.0
-    for zz in leading:
-        viol = violations(first.free_run[zz.name], zz.comfort_low, z)
-        if viol and (first_i is None or viol[0][0] < first_i):
-            driver, first_i, deficit = zz.name, viol[0][0], max(d for _, d in viol)
+    # the driver is the first violation a block can prevent; only if there is none, the first at all (accepted)
+    for reachable_only in (True, False):
+        for zz in leading:
+            viol = (
+                first.reachable_violations(zz, z) if reachable_only
+                else violations(first.free_run[zz.name], zz.comfort_low, z)
+            )
+            if viol and (first_i is None or viol[0][0] < first_i):
+                driver, first_i, deficit = zz.name, viol[0][0], max(d for _, d in viol)
+        if driver is not None:
+            break
     out: dict = {
         "code": None,
         "driver": driver,

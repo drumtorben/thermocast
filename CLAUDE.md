@@ -219,7 +219,7 @@ Attr. Parameter + Sonnenantwort je Fläche).
 
 ---
 
-## 4. Status (v0.9.0)
+## 4. Status (v0.9.2)
 
 - ✅ Kern getestet auf synthetischen Daten: 1-Schritt-MAE ≈ 0,03 K/h, 24-h-Prognose-MAE ≈ 0,1 K,
   Ostfenster und Süddach werden getrennt gelernt, Planer heizt bei −5 °C, nicht bei 18 °C.
@@ -307,6 +307,10 @@ Attr. Parameter + Sonnenantwort je Fläche).
   Panel-Banner + Hinterlegung. Synthetisch: 12 h Vorlauf reichen bei +5 °C, bei −5 °C fehlt bei Rückkehr ~1 K.
   Tests hängen `custom_components/thermocast` jetzt **hinten** an `sys.path` (Plattform `datetime.py` überdeckte sonst
   das stdlib-Modul).
+  v0.9.2: Unterschreitungen, die kein Block verhindern kann (Raum in der Ruhezeit, auf den Grundwert gedeckelt, mit
+  Nacht-Komfort), setzen weder den spätesten Start noch die Zehrzeit (`_reachable`: Heizen von jetzt bis Horizontende
+  hebt die Stunde nicht an); Begründung nennt zuerst eine verhinderbare Unterschreitung. Anlass: Block 4–6 Uhr wegen
+  einer Ruhezeit-Unterschreitung um 5 Uhr, gebraucht wurde er für das Wohnzimmer am Nachmittag.
 - Bekannte Schwächen:
   - Prognose nutzt aktuelle Nachbartemperaturen als konstant über den Horizont (Gewinne: Tagesprofil, s. o.).
   - Ein Gerät, das kühlt (z. B. Klimagerät im Sommer), meldet als Leistungssensor positive Watt – Gewinne sind ≥ 0;

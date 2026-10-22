@@ -139,6 +139,15 @@ class PlanResult:
     planned: dict[str, Prediction] = field(default_factory=dict)  # all zones with the chosen block
     violation_free: dict[str, float] = field(default_factory=dict)
     ranked: list[ScoredCandidate] = field(default_factory=list)  # cheapest first
+    # per leading zone the hours a block can still warm (None = not computed: every hour counts)
+    reachable: dict[str, set[int]] | None = None
+
+    def reachable_violations(self, zone: ZonePlanInput, z: float) -> list[tuple[int, float]]:
+        """The zone's free-run violations a block could prevent."""
+        viol = violations(self.free_run[zone.name], zone.comfort_low, z)
+        if self.reachable is None or zone.name not in self.reachable:
+            return viol
+        return [(i, d) for i, d in viol if i in self.reachable[zone.name]]
 
     @property
     def heat_now(self) -> bool:
@@ -252,6 +261,19 @@ def _coast_beyond(preds: dict[str, Prediction], zones: list[ZonePlanInput], z: f
     return out
 
 
+def _reachable(zones: list[ZonePlanInput], free: dict[str, Prediction], horizon: int) -> dict[str, set[int]]:
+    """Hours a block can warm at all: heating from now through the horizon (an upper bound for every block) lifts
+    them above the free run. A room in its quiet time (thermostat off, capped at its base) falls below a night
+    comfort no block prevents – such hours must not set the latest start or cut a block's coast short."""
+    out: dict[str, set[int]] = {}
+    if horizon <= 0:
+        return out
+    for zz in zones:
+        _, mean, _ = zz.heating_batch([Candidate(0, horizon)])
+        out[zz.name] = {i for i in range(horizon) if mean[0, i] > free[zz.name].mean[i] + 1e-6}
+    return out
+
+
 def plan(
     zones: list[ZonePlanInput],
     block_lengths: tuple[int, ...] = (2, 3, 4, 6, 8, 10, 12),
@@ -290,11 +312,16 @@ def plan(
             violation_free=free_violation, ranked=[scored],
         )
 
+    reach = _reachable(leading, free, horizon)
+
+    def lead_violations(zz: ZonePlanInput, pred: Prediction) -> list[tuple[int, float]]:
+        return [(i, d) for i, d in violations(pred, zz.comfort_low, z) if i in reach[zz.name]]
+
     # a block starting after the first violation cannot prevent it – in coast mode those candidates only
     # cost time (the next re-plan covers later blocks); a running block with nothing in sight: continue or stop
     latest = horizon
     if coast_mode:
-        first = [v[0][0] for zz in leading if (v := violations(free[zz.name], zz.comfort_low, z))]
+        first = [v[0][0] for zz in leading if (v := lead_violations(zz, free[zz.name]))]
         latest = min(first) + 1 if first else (1 if running else horizon)
     candidates = [Candidate(None)]
     for length in block_lengths:
@@ -328,7 +355,7 @@ def plan(
                 pred = Prediction(mean=mean[k - 1].tolist(), std=std[k - 1].tolist())
             if zz.leads_release:
                 preds[zz.name] = pred
-                viol += violations(pred, zz.comfort_low, z)
+                viol += lead_violations(zz, pred)
             if zz.name in bounded_names:
                 overheat += overheat_kh(pred, zz.comfort_high)
         violation, coast = _counted(viol, cand, horizon, coast_mode)
@@ -350,5 +377,5 @@ def plan(
             planned[zz.name] = zz.heating_prediction(best.candidate)[1]
     return PlanResult(
         best=best.candidate, cost=best.cost, free_run=free, planned=planned,
-        violation_free=free_violation, ranked=ranked,
+        violation_free=free_violation, ranked=ranked, reachable=reach,
     )

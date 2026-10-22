@@ -7,7 +7,7 @@ from functools import lru_cache
 from .core_helpers import SPEC, future, record, trained_model
 from .synthetic import simulate
 from core.model import OnlineZoneModel, ZoneSpec
-from core.planner import CYCLE_STARTS_PER_H, Candidate, ZonePlanInput, charge_cost, default_cost, plan
+from core.planner import CYCLE_STARTS_PER_H, Candidate, ZonePlanInput, charge_cost, default_cost, plan, violations
 from core.rollout import ActuatorState, rollout
 from core.rules import Rules
 
@@ -238,3 +238,23 @@ def test_budget_realistic_four_zones_52_steps():
 def test_rollout_respects_the_charge_cap():
     ro = rollout([_zone(t_out=-5.0, cap=21.0, radiator=True)], 30, RULES, ActuatorState(on=False), cost_fn=charge_cost(0.8), z=0.0)
     assert max(ro.zones["z"].mean) < 21.3
+
+
+def test_violation_in_quiet_time_does_not_pull_the_block_forward():
+    """Real case: a radiator room in its quiet time (thermostat off, capped at its base) falls 0.1 K below its night
+    comfort at 05:00 – no block can prevent that. It still set the latest start, so the block for the living room's
+    afternoon need was planned for 04–06 instead of shortly before the afternoon."""
+    from core.explain import explain
+    from datetime import UTC, datetime
+
+    lead = _zone(t_out=3.0, temp=21.0, hours=24, high=22.0)
+    lead = type(lead)(**{**lead.__dict__, "name": "wz", "comfort_low": [None] * 14 + [20.8] * 10})
+    room = _zone(t_out=3.0, temp=20.3, hours=24, radiator=True)
+    quiet = [15.0] * 10 + [21.5] * 14  # thermostat off until hour 10
+    room = type(room)(**{**room.__dict__, "name": "ph", "comfort_low": [20.2] * 10 + [None] * 14,
+                         "charge_cap": quiet})
+    assert violations(room.predict(room.future), room.comfort_low, 0.0)  # it does fall below in quiet time
+    res = plan([lead, room], cost_fn=charge_cost(0.0), z=0.0)
+    assert res.best.start is not None and res.best.start >= 6
+    ex = explain(res, [lead, room], datetime(2026, 10, 22, 18, tzinfo=UTC), 0.0)
+    assert ex["driver"] == "wz"
