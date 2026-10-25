@@ -12,15 +12,18 @@ dev = [
     # pins a matching homeassistant + pytest/pytest-asyncio
     "pytest-homeassistant-custom-component",
     # stay on a stable HA release (newest plugin versions track betas)
-    "homeassistant>=2026.9,<2026.10",
+    "homeassistant>=2026.10,<2026.11",
     # HA installs this at runtime; without it in the lock, `uv sync` removes it and every test that loads
     # `frontend`/`panel_custom` fails. Keep in sync with homeassistant/components/frontend/manifest.json.
-    "home-assistant-frontend==20260826.7",
+    "home-assistant-frontend==20260930.5",
     "ruff",
 ]
 
 [tool.uv]
 package = false
+# HA pins Pillow==12.3.0, the security advisories are fixed in 13.0.0. Dev-only: Thermocast does not use Pillow.
+# Drop once homeassistant pins Pillow >= 13.
+override-dependencies = ["pillow>=13.0.0"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -223,7 +223,7 @@ Attr. Parameter + Sonnenantwort je Fläche).
 
 - ✅ Kern getestet auf synthetischen Daten: 1-Schritt-MAE ≈ 0,03 K/h, 24-h-Prognose-MAE ≈ 0,1 K,
   Ostfenster und Süddach werden getrennt gelernt, Planer heizt bei −5 °C, nicht bei 18 °C.
-- ✅ HA-Schicht getestet gegen HA 2026.9 (`tests/test_config_flow.py`, `tests/test_init.py`):
+- ✅ HA-Schicht getestet gegen HA 2026.10 (`tests/test_config_flow.py`, `tests/test_init.py`):
   Config Flow inkl. Release-Werte, Options, Zonen-Subentries (anlegen/rekonfigurieren + Reload),
   Entitäten an Subentry-Devices, Beobachtungsmodus, Aktor (sperren/freigeben), Fail-safes
   (Sensor fehlt, keine Prognose, Entladen, Steuerung aus), Stundenabschluss → RLS-Update + Store.
