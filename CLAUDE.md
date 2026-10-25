@@ -356,7 +356,7 @@ Attr. Parameter + Sonnenantwort je Fläche).
   scheitern danach alle Tests, die `frontend`/`panel_custom` laden. Beim HA-Update mitziehen.
 - Tests: `uv run pytest` (Kern + HA). Neue Modell-Features immer gegen `tests/synthetic.py` prüfen.
 - Lokale HA-Instanz: `./scripts/develop` (Config in `config/configuration.yaml`, Fake-Sensoren).
-- Panel-Frontend: Plain-JS-Module + `frontend/lit.js` (Lit 3.3.1 vendort), **kein Build, kein CDN**.
+- Panel-Frontend: Plain-JS-Module + `frontend/lit.js` (Lit 3.3.3 vendort), **kein Build, kein CDN**.
   Texte nur in `frontend/i18n.js` (de/en). Backend liefert Codes + Zahlen, nie fertige Sätze.
   Schnell iterieren über `frontend/dev/` (siehe README). Der View-Vertrag (`core/view.py`, Version 1)
   ist die Schnittstelle – Änderungen dort immer mit `tests/test_view.py`.
