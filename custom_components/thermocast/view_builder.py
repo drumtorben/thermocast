@@ -306,7 +306,7 @@ class ViewBuilder:
                 for key, vals in fc.irr.items()
                 if key != "0_0" or not labels
             ]
-            inputs = build_plan_inputs(hass, c.zones, fc, idx0, len(fc.times) - idx0 - 1)
+            inputs = build_plan_inputs(hass, c.zones, fc, idx0, len(fc.times) - idx0 - 1, zval)
             if inputs:
                 state = self._actuator_state(now, data)
                 steps = n - window.now_index

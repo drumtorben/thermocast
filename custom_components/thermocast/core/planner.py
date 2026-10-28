@@ -13,6 +13,8 @@ import numpy as np
 
 from .model import HourRecord, OnlineZoneModel, Prediction
 
+CAP_TOLERANCE = 0.01  # K: an hour ending this little above the charge cap counts as at the cap
+
 
 @dataclass
 class ZonePlanInput:
@@ -77,7 +79,7 @@ class ZonePlanInput:
 
     def heating_batch(self, cands: list[Candidate]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """(q, mean, std) for many blocks at once (candidates × hours); a capped zone's thermostat closes the
-        valve in hours that start at or above its cap."""
+        valve in hours that start at or above its cap, and partway through an hour that would end above it."""
         n = len(self.future)
         q = np.where(_active(cands, n), self.q_on, 0.0)
         mean, std = self.predict_batch(q)
@@ -87,10 +89,19 @@ class ZonePlanInput:
         for _ in range(3):  # closing the valve changes the later hours – a few passes settle it
             start_temp = np.concatenate([np.full((len(cands), 1), self.temp_now), mean[:, :-1]], axis=1)
             shut = (q > 0) & (start_temp >= caps)  # NaN (no cap) compares False
-            rows = shut.any(axis=1)
+            over = (q > 0) & ~shut & (mean > caps + CAP_TOLERANCE)
+            rows = (shut | over).any(axis=1)
             if not rows.any():
                 break
             q[shut] = 0.0
+            if over.any():
+                # the room reaches the cap within the hour: heat only that share of it (the model is linear in q)
+                q_off = np.where(over, 0.0, q)
+                cold, _ = self.predict_batch(q_off[rows])
+                share = np.ones_like(q)
+                with np.errstate(divide="ignore", invalid="ignore"):  # only the ``over`` hours are used
+                    share[rows] = np.clip((caps[None, :] - cold) / (mean[rows] - cold), 0.0, 1.0)
+                q = np.where(over, q * share, q)
             mean[rows], std[rows] = self.predict_batch(q[rows])
         return q, mean, std
 

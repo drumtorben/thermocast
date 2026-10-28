@@ -23,6 +23,7 @@ from .actuator import Actuator
 from .const import (
     CALIBRATION_DAYS,
     CHARGE_MIN_COMFORT_H,
+    CHARGE_NEED_H,
     CONF_ACTIVE_FROM,
     CONF_ACTIVE_TO,
     CONF_ANTI_CYCLE_MIN,
@@ -75,7 +76,7 @@ from .const import (
 )
 from .core.forecast import Forecast, fetch_forecast
 from .core.model import HourRecord, OnlineZoneModel, SurfaceSpec, ZoneSpec, gain_path, typical_gains, update_q_on
-from .core.planner import PlanResult, ZonePlanInput, charge_cost, plan
+from .core.planner import PlanResult, ZonePlanInput, charge_cost, plan, violations
 from .core.quality import ForecastLog, RingLog, calibration, measured_by_hour, param_snapshot, std_scale_profile
 from .core.rollout import block_lengths_for
 from .core.rules import (
@@ -178,6 +179,8 @@ class ZoneRuntime:
     schedule_plan: dict[str, list[dict[str, Any]]] | None = None  # weekly plan of the comfort schedule
     quiet_plan: dict[str, list[dict[str, Any]]] | None = None  # weekly plan of the quiet-time schedule
     precharge_h: int = DEFAULT_PRECHARGE_H  # house option: charge in a block when comfort starts within this
+    # per planned hour (UTC start): would the zone fall below its lower bound soon without heating? (unknown = yes)
+    charge_need: dict[datetime, bool] = field(default_factory=dict)
     vacation: Vacation = field(default_factory=Vacation)  # house-wide, set by the coordinator
     # airing (window entities, tracked by state change – a short airing often falls between two updates)
     window_open: bool = False
@@ -295,11 +298,14 @@ def zone_charge_target(z: ZoneRuntime, when: datetime) -> float:
     ``z.precharge_h`` hours, otherwise the current lower bound (a room nobody uses before next week stays cool).
     In comfort time it charges only if there is comfort CHARGE_MIN_COMFORT_H hours ahead or later – near the end of
     comfort the charge would outlast its use, so it holds comfort − band. Before a short comfort window (e.g. one
-    hour at bedtime) it still charges: that charge is what the window needs."""
+    hour at bedtime) it still charges: that charge is what the window needs. A zone that would not fall below its
+    lower bound without heating (``z.charge_need``, set when planning) holds it too."""
 
     def comfort_in(first: int, last: int) -> bool:
         return any(zone_comfort(z, when + timedelta(hours=h)) is not None for h in range(first, last + 1))
 
+    if not z.charge_need.get(when.replace(minute=0, second=0, microsecond=0), True):
+        return zone_floor(z, when)
     if zone_comfort(z, when) is not None:
         ending = not comfort_in(CHARGE_MIN_COMFORT_H, max(CHARGE_MIN_COMFORT_H, z.precharge_h))
         return zone_floor(z, when) if ending else zone_high(z, when)
@@ -366,7 +372,8 @@ def zone_typical_gains(z: ZoneRuntime) -> dict[int, tuple[float, ...]]:
 
 
 def build_plan_inputs(
-    hass: HomeAssistant, zones: dict[str, ZoneRuntime], fc: Forecast, idx0: int, horizon: int
+    hass: HomeAssistant, zones: dict[str, ZoneRuntime], fc: Forecast, idx0: int, horizon: int,
+    z_sigma: float = DEFAULT_CONFIDENCE_Z,
 ) -> list[ZonePlanInput]:
     """Plan inputs from forecast index ``idx0`` for ``horizon`` hours (zones without temperature are left out).
 
@@ -378,6 +385,7 @@ def build_plan_inputs(
     for sid, z in zones.items():
         temp = zone_temp(hass, z)
         if temp is None:
+            z.charge_need = {}
             continue
         # just aired: the drop is the air, not the stored heat – plan from the temperature before the airing
         temp = window_recovery_temp(temp, z.window_before, z.window_closed, now)
@@ -401,17 +409,23 @@ def build_plan_inputs(
         # an open window: the room cools by airing, not for lack of heat – it neither calls for a block nor
         # takes heat (its thermostat holds the base); after closing, it plans from the temperature before
         window = zone_window_open(hass, z)
-        caps = [zone_charge_cap(z, t) for t in starts]
-        inputs.append(
-            ZonePlanInput(
-                name=sid, model=z.model, temp_now=temp, future=future,
-                comfort_low=[zone_floor(z, t) for t in ends],
-                comfort_high=[zone_high(z, t) for t in ends],
-                charge_cap=[zone_base(z, t) if window and c is not None else c for c, t in zip(caps, starts)],
-                q_on=z.q_on, leads_release=bool(z.cfg.get(CONF_LEADS_RELEASE, True)) and not window,
-                std_scale=z.std_scale,
-            )
+        zi = ZonePlanInput(
+            name=sid, model=z.model, temp_now=temp, future=future,
+            comfort_low=[zone_floor(z, t) for t in ends],
+            comfort_high=[zone_high(z, t) for t in ends],
+            q_on=z.q_on, leads_release=bool(z.cfg.get(CONF_LEADS_RELEASE, True)) and not window,
+            std_scale=z.std_scale,
         )
+        if z.cfg.get(CONF_BT_CONTROL):
+            # a block charges the zone only if it would fall below its lower bound soon without heating – else the
+            # charge serves nobody (real case: a room at 20.6 °C, never below 20.0, charged to 21 for another room)
+            low = {i for i, _ in violations(zi.predict(future), zi.comfort_low, z_sigma)}
+            z.charge_need = {
+                t: any(k in low for k in range(h, h + CHARGE_NEED_H)) for h, t in enumerate(starts)
+            }
+        caps = [zone_charge_cap(z, t) for t in starts]
+        zi.charge_cap = [zone_base(z, t) if window and c is not None else c for c, t in zip(caps, starts)]
+        inputs.append(zi)
     return inputs
 
 
@@ -1066,7 +1080,8 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
             return {"zones": zones_out, "want_heat": True, "failsafe": "forecast_gap", "block_start": None, "block_end": None}
         horizon = min(HORIZON_HOURS, len(fc.times) - idx0 - 1)
         times = [fc.times[idx0 + 1 + h] for h in range(horizon)]
-        inputs = build_plan_inputs(hass, self.zones, fc, idx0, horizon)
+        zval = float(self.config_entry.options.get(CONF_CONFIDENCE_Z, DEFAULT_CONFIDENCE_Z))
+        inputs = build_plan_inputs(hass, self.zones, fc, idx0, horizon, zval)
         failsafe = None
         planned_ids = {zi.name for zi in inputs}
         for sid, z in self.zones.items():
@@ -1085,7 +1100,6 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
                 "block_start": None, "block_end": None,
             }
 
-        zval = float(self.config_entry.options.get(CONF_CONFIDENCE_Z, DEFAULT_CONFIDENCE_Z))
         lengths = block_lengths_for(float(self.config_entry.options.get(CONF_MIN_BLOCK_H, DEFAULT_MIN_BLOCK_H)))
         # numpy work off the event loop
         running = self.actuator.commanded if self.control_enabled else self.view_builder.shadow_on

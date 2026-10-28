@@ -8,7 +8,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field, replace
 
-from .planner import CostFn, PlanResult, ZonePlanInput, default_cost, plan
+from .planner import CAP_TOLERANCE, CostFn, PlanResult, ZonePlanInput, default_cost, plan
 from .rules import Rules, apply_rules
 
 DEFAULT_BLOCK_LENGTHS: tuple[int, ...] = (2, 3, 4, 6, 8, 10, 12)
@@ -131,6 +131,14 @@ def rollout(
             heats = on and (cap is None or temps[name] < cap)  # the thermostat closes at its cap
             rec = replace(zi.future[h], q=zi.q_on if heats else 0.0)
             p = zi.model.predict(temps[name], [rec], var0=var[name], history=hist[name], w0=wsd[name])
+            if heats and cap is not None and p.mean[0] > cap + CAP_TOLERANCE:
+                # the room reaches the cap within the hour: heat only that share of it (like the planner)
+                cold = zi.model.predict(
+                    temps[name], [replace(rec, q=0.0)], history=hist[name], with_contrib=False
+                ).mean[0]
+                share = min(max((cap - cold) / (p.mean[0] - cold), 0.0), 1.0) if p.mean[0] > cold else 0.0
+                rec = replace(rec, q=rec.q * share)
+                p = zi.model.predict(temps[name], [rec], var0=var[name], history=hist[name], w0=wsd[name])
             tr = trajs[name]
             tr.mean.append(p.mean[0])
             tr.std.append(p.std[0])

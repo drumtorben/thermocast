@@ -114,8 +114,8 @@ async def test_open_window_neither_leads_nor_takes_heat(hass: HomeAssistant) -> 
 
     z = _z(**{CONF_BT_CONTROL: True, CONF_BT_ENTITY: "climate.bt", CONF_COMFORT_HIGH: 22.5, CONF_BASE_TEMP: 18.0,
               "window_entities": ["binary_sensor.window"]})
-    hass.states.async_set("sensor.living", "20.0")
-    hass.states.async_set("sensor.kitchen", "20.0")
+    hass.states.async_set("sensor.living", "17.5")  # below its floor: a block charges it
+    hass.states.async_set("sensor.kitchen", "17.5")
     t0 = datetime(2026, 10, 7, 6, tzinfo=UTC)
     fc = Forecast(times=[t0 + timedelta(hours=h) for h in range(8)], t_out=[5.0] * 8, irr={}, fetched_at=t0)
     hass.states.async_set("binary_sensor.window", "off")
@@ -124,6 +124,28 @@ async def test_open_window_neither_leads_nor_takes_heat(hass: HomeAssistant) -> 
     hass.states.async_set("binary_sensor.window", "on")
     airing = build_plan_inputs(hass, {"z": z}, fc, 0, 6)[0]
     assert not airing.leads_release and set(airing.charge_cap) == {18.0}
+
+
+async def test_block_charges_only_zones_that_would_fall_below(hass: HomeAssistant) -> None:
+    """Real case: a room at 20.6 °C with comfort − band 20.0 that never falls below it overnight was charged to its
+    upper bound in a block another room needed. A zone charges only if it would fall below without heating."""
+    from custom_components.thermocast.coordinator import build_plan_inputs
+    from custom_components.thermocast.core.forecast import Forecast
+
+    z = _z(**{CONF_BT_CONTROL: True, CONF_BT_ENTITY: "climate.bt", CONF_COMFORT_HIGH: 22.5, CONF_BASE_TEMP: 18.0})
+    t0 = _local(hass, 8)  # comfort 06–22, 20.5 − 0.3
+    fc = Forecast(times=[t0 + timedelta(hours=h) for h in range(8)], t_out=[5.0] * 8, irr={}, fetched_at=t0)
+    for e in ("sensor.living", "sensor.kitchen"):
+        hass.states.async_set(e, "20.0")  # below comfort − band (20.2): charge
+    cold = build_plan_inputs(hass, {"z": z}, fc, 0, 6, z_sigma=0.0)[0]
+    assert set(cold.charge_cap) == {22.5}
+    assert zone_charge_target(z, t0) == 22.5  # the BT actuator follows
+    for e in ("sensor.living", "sensor.kitchen"):
+        hass.states.async_set(e, "23.0")  # far above it: hold comfort − band
+    warm = build_plan_inputs(hass, {"z": z}, fc, 0, 6, z_sigma=0.0)[0]
+    assert set(warm.charge_cap) == {20.2}
+    assert zone_charge_target(z, t0) == 20.2 and zone_charge_cap(z, t0 + timedelta(minutes=30)) == 20.2
+    assert zone_charge_target(z, t0 + timedelta(days=1)) == 22.5  # hours nobody planned: as before
 
 
 async def test_tail_trim_reads_the_burner_starts_counter(hass: HomeAssistant) -> None:

@@ -159,7 +159,12 @@ Live und im Rollout: `charge_cost(w)` („Laden & Zehren“, Spec `docs/superpow
   Unterschreitungen nach der Zehrzeit sind Sache des nächsten Blocks (außer Pause < 2 h).
   Ohne das sah der Ein-Block-Planer den nächsten Start nie, und der Regler wirkte nicht.
 - Läuft ein Block schon (`running`), kostet Weiterheizen keinen Start (sonst bricht die Neuplanung Blöcke ab).
-- BT-gesteuerte Zonen sind gedeckelt (`charge_cap`): q = 0, sobald die Zone ihr Ladeziel (Ruhezeit: Grundwert) erreicht.
+- BT-gesteuerte Zonen sind gedeckelt (`charge_cap`): q = 0, sobald die Zone ihr Ladeziel (Ruhezeit: Grundwert) erreicht;
+  würde eine Heizstunde darüber enden, heizt sie nur anteilig (Modell linear in q, Planer + Rollout, `CAP_TOLERANCE`).
+  Verzögerte Wärme (`heat:1`) schießt weiter über – die steckt schon im Heizkörper.
+  Ladeziel Obergrenze nur bei **Bedarf** (`ZoneRuntime.charge_need` je Stunde, in `build_plan_inputs`): der freie Verlauf
+  (mean − z·σ) fällt in den nächsten `CHARGE_NEED_H` 24 h unter die Untergrenze; sonst Untergrenze (unbekannt = Bedarf).
+  Anlass: Raum bei 20,6 °C, nachts nie unter 20,0, wurde im Block eines anderen Raums auf 21 geladen (Prognose 21,26).
   Ladeziel (`zone_charge_target`) = Obergrenze in der Komfortzeit oder wenn sie bald beginnt (Option `precharge_hours`, Standard 12 h);
   in der Komfortzeit nur, wenn in ≥ 3 h noch/wieder Komfort ist (`CHARGE_MIN_COMFORT_H`, sonst lädt der Block kurz vor
   Komfortende für den leeren Abend; vor einem kurzen Fenster, z. B. 1 h zur Bettzeit, wird weiter vorgeladen), sonst

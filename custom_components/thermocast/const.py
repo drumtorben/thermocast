@@ -42,6 +42,7 @@ DEFAULT_ANTI_CYCLE_MIN = 0
 CONF_PRECHARGE_H = "precharge_hours"  # outside comfort time a block charges a BT zone only if comfort starts
 DEFAULT_PRECHARGE_H = 12  # within this many hours (0 = only in comfort time)
 CHARGE_MIN_COMFORT_H = 3  # … and only if there is comfort this many hours ahead or later (not near its end)
+CHARGE_NEED_H = 24  # … and only if the zone would fall below its lower bound within this many hours without heating
 
 DEFAULT_MIN_BLOCK_H = 3
 DEFAULT_MIN_PAUSE_H = 2

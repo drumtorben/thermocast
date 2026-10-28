@@ -53,6 +53,30 @@ def test_charge_cap_stops_heating_at_the_cap():
     assert all(r.q == 0.0 for r, m in zip(capped.heating_records(block)[1:], held) if m >= 21.0)
 
 
+def test_cap_closes_within_the_hour():
+    """Real case: 20.99 °C at the start of the hour, cap 21 – the whole hour heated and the forecast ended at 21.26.
+    The thermostat closes when the room reaches the cap, so that hour heats only partly. (Heat lagged by an hour is
+    already in the radiator – that overshoot stays; the room here heats within the hour, like the real one.)"""
+    m = _radiator_model()
+    i0, i1 = m.names.index("heat:0"), m.names.index("heat:1")
+    m.theta[i0], m.theta[i1] = m.theta[i1], m.theta[i0]  # the synthetic radiator learned its heat 1 h late
+
+    def zone(**kw) -> ZonePlanInput:
+        zi = _zone(radiator=True, **kw)
+        return type(zi)(**{**zi.__dict__, "model": m})
+
+    capped, free = zone(cap=21.0), zone()
+    block = Candidate(0, 6)
+    hot = free.predict(free.heating_records(block)).mean
+    i = next(i for i, v in enumerate(hot) if v > 21.0)
+    assert hot[i] > 21.05 and hot[i - 1] < 21.0  # this hour starts below the cap and a full hour ends above it
+    recs, pred = capped.heating_prediction(block)
+    assert 0.0 < recs[i].q < 15.0
+    assert abs(pred.mean[i] - 21.0) < 0.03 and max(pred.mean) < 21.03
+    ro = rollout([zone(t_out=-5.0, cap=21.0)], 30, RULES, ActuatorState(on=False), cost_fn=charge_cost(0.8), z=0.0)
+    assert max(ro.zones["z"].mean) < 21.03
+
+
 def test_no_cap_keeps_the_old_block_inputs():
     z = _zone()
     recs = z.heating_records(Candidate(2, 3))
