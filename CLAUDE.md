@@ -224,7 +224,7 @@ Attr. Parameter + Sonnenantwort je Fläche).
 
 ---
 
-## 4. Status (v0.9.5)
+## 4. Status (v0.9.6)
 
 - ✅ Kern getestet auf synthetischen Daten: 1-Schritt-MAE ≈ 0,03 K/h, 24-h-Prognose-MAE ≈ 0,1 K,
   Ostfenster und Süddach werden getrennt gelernt, Planer heizt bei −5 °C, nicht bei 18 °C.
@@ -321,6 +321,10 @@ Attr. Parameter + Sonnenantwort je Fläche).
   zu, und der Vormittagsbedarf einer nachts gedeckelten Zone galt als unverhinderbar.
   v0.9.5: BT-Zone lädt im Block nur bei Bedarf (freier Verlauf in 24 h unter der Untergrenze, sonst Untergrenze);
   Deckel schließt innerhalb der Stunde (anteiliges q statt voller Stunde ab 20,99 °C).
+  v0.9.6: Unterschreitung, die kein späterer Block heizen kann (letzte offene Stunde der Zone vor Blockende, z. B.
+  Raum in der Ruhezeit), zählt für den Block davor und beendet seine Zehrzeit nicht (`_last_open`). Anlass: Abend-Block
+  lud einen Raum mit Ruhezeit 19–07 nur auf 20,6 °C, nachts 19,5 °C unter 20,0 – die Unterschreitung galt als Sache
+  des nächsten Blocks und kostete keinen etwas.
 - Bekannte Schwächen:
   - Prognose nutzt aktuelle Nachbartemperaturen als konstant über den Horizont (Gewinne: Tagesprofil, s. o.).
   - Ein Gerät, das kühlt (z. B. Klimagerät im Sommer), meldet als Leistungssensor positive Watt – Gewinne sind ≥ 0;
