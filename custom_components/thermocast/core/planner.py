@@ -281,11 +281,29 @@ def _reachable(zones: list[ZonePlanInput], free: dict[str, Prediction], horizon:
     if horizon <= 0:
         return out
     for zz in zones:
-        n = len(zz.future)
-        start_temp = [zz.temp_now, *free[zz.name].mean[:-1]]
-        open_ = [(c := zz.cap_at(i)) is None or start_temp[i] < c for i in range(n)]
+        open_ = _open_hours(zz, free[zz.name])
         mean, _ = zz.predict_batch(np.where(np.array([open_]), zz.q_on, 0.0))
         out[zz.name] = {i for i in range(horizon) if mean[0, i] > free[zz.name].mean[i] + 1e-6}
+    return out
+
+
+def _open_hours(zz: ZonePlanInput, free: Prediction) -> list[bool]:
+    """Hours the zone may take heat at all: no cap, or the free run starts the hour below it."""
+    start_temp = [zz.temp_now, *free.mean[:-1]]
+    return [(c := zz.cap_at(i)) is None or start_temp[i] < c for i in range(len(zz.future))]
+
+
+def _last_open(zones: list[ZonePlanInput], free: dict[str, Prediction]) -> dict[str, list[int]]:
+    """Per zone and hour the latest hour up to it in which the zone takes heat (−1: none). A violation whose last
+    open hour lies before a block's end cannot be the next block's job – e.g. a room in its quiet time (thermostat
+    off) only the block before the quiet time can charge."""
+    out: dict[str, list[int]] = {}
+    for zz in zones:
+        last, run = -1, []
+        for i, o in enumerate(_open_hours(zz, free[zz.name])):
+            last = i if o else last
+            run.append(last)
+        out[zz.name] = run
     return out
 
 
@@ -328,6 +346,7 @@ def plan(
         )
 
     reach = _reachable(leading, free, horizon)
+    last_open = _last_open(leading, free)
 
     def lead_violations(zz: ZonePlanInput, pred: Prediction) -> list[tuple[int, float]]:
         return [(i, d) for i, d in violations(pred, zz.comfort_low, z) if i in reach[zz.name]]
@@ -360,6 +379,8 @@ def plan(
     for k, cand in enumerate(candidates):
         preds: dict[str, Prediction] = {}
         viol: list[tuple[int, float]] = []
+        own = 0.0  # K·h after the block that no later block can heat for – always this candidate's
+        end = cand.start + cand.length if cand.start is not None else 0
         overheat = 0.0
         closed = float(closed_by_cand[k - 1]) if cand.start is not None else 0.0
         for zz in scored_zones:
@@ -370,11 +391,16 @@ def plan(
                 pred = Prediction(mean=mean[k - 1].tolist(), std=std[k - 1].tolist())
             if zz.leads_release:
                 preds[zz.name] = pred
-                viol += lead_violations(zz, pred)
+                for i, d in lead_violations(zz, pred):
+                    if cand.start is not None and i >= end and last_open[zz.name][i] < end:
+                        own += d
+                    else:
+                        viol.append((i, d))
             if zz.name in bounded_names:
                 overheat += overheat_kh(pred, zz.comfort_high)
         violation, coast = _counted(viol, cand, horizon, coast_mode)
-        covers = cand.start is not None and not any(i >= cand.start + cand.length for i, _ in viol)
+        violation += own
+        covers = cand.start is not None and own == 0.0 and not any(i >= end for i, _ in viol)
         if coast_mode and covers:
             coast += _coast_beyond(preds, leading, z)  # no next block needed inside the horizon
         parts = cost_fn(cand, violation, overheat, coast, closed)

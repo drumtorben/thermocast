@@ -296,3 +296,23 @@ def test_violation_after_a_low_cap_stays_reachable():
     res = plan([room], cost_fn=charge_cost(0.0), z=0.0)
     assert {i for i, _ in viol} <= res.reachable["bu"]
     assert res.best.start is not None
+
+
+def test_violation_in_quiet_time_stays_with_the_block_before_it():
+    """Real case (0.9.5): a radiator room's thermostat is off 19–07, night comfort 20.0. The evening block charged it
+    to 20.6 and it fell to 19.5 by the morning – the planner left that night violation to "the next block", which
+    cannot heat the room before 07. The block before the quiet time has to pay for it, so it charges more."""
+    hours = 24
+    room = _zone(t_out=0.0, temp=20.3, hours=hours, radiator=True)
+    quiet = [21.0] * 4 + [15.0] * 12 + [21.0] * 8  # thermostat off from hour 4 to 16
+    room = type(room)(**{**room.__dict__, "name": "ph", "comfort_low": [None] * 4 + [20.0] * 12 + [None] * 8,
+                         "charge_cap": quiet})
+    res = plan([room], block_lengths=(2,), cost_fn=charge_cost(0.0), z=0.0)
+    late = next(s for s in res.ranked if s.candidate.start == 2)  # block ends right when the quiet time starts
+    viol = violations(late.preds["ph"], room.comfort_low, 0.0)
+    assert viol and min(i for i, _ in viol) >= 6  # it coasts a while, then falls below in the quiet time
+    assert late.violation >= sum(d for _, d in viol) - 1e-9  # charged to this block, not the next one
+    assert late.parts["comfort"] > 0
+    best = plan([room], cost_fn=charge_cost(0.0), z=0.0)
+    assert best.best.start is not None and best.best.start + best.best.length <= 4  # charges before the quiet time
+    assert best.ranked[0].violation < late.violation  # longer: less of the night below comfort
