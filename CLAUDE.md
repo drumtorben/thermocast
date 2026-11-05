@@ -112,6 +112,10 @@ T[t+1] − T[t] = b0 + a·(T_out − T)
   um bis zu +75 % daneben (12-Uhr-Stunde: 13,3 statt 9,0). Pumpen-Anteil für `q_on` ebenso;
   Heizkörper × Ventilanteil – bevorzugt `hvac_action` des TRV-Thermostats (heating/idle), denn der TRVZB
   meldet keine echte Ventilstellung (`valve_opening_degree` ist nur eine Grenze).
+- **Frostschutz** (v0.9.7): das RC310 lässt die Pumpe unter seiner Frostgrenze (hier außen 5 °C) laufen, Brenner aus. Pumpe
+  zählt daher nicht als Heizen, wenn die Freigabe sicher aus **und** der Vorlauf < `IDLE_FLOW_MAX` 28 °C ist (live, Panel,
+  Warmstart; Stundenmittel ohne WW-Ladungen, die heben es sonst darüber). Heißer Vorlauf zählt weiter: bei Freigabe „Auto“
+  heizt das RC310 unter der Schwelle trotz Sperre. `q_on` wird einmalig aus Log + Recorder neu gerechnet (`q_on_repaired`).
 - `q_on` (Heiz-Proxy, den der Planer je Blockstunde annimmt): EMA (α 0,2) nur über Stunden mit Pumpe ≥ 75 % der
   Stunde, auf die Pumpenzeit normiert (`block_q`/`update_q_on`), live und im Warmstart (zeitlich geordnet).
   Vorher Mittel aller Stunden mit q > 1 → im Warmstart dominierte der alte Dauerbetrieb mit wenig Vorlauf
@@ -224,7 +228,7 @@ Attr. Parameter + Sonnenantwort je Fläche).
 
 ---
 
-## 4. Status (v0.9.6)
+## 4. Status (v0.9.7)
 
 - ✅ Kern getestet auf synthetischen Daten: 1-Schritt-MAE ≈ 0,03 K/h, 24-h-Prognose-MAE ≈ 0,1 K,
   Ostfenster und Süddach werden getrennt gelernt, Planer heizt bei −5 °C, nicht bei 18 °C.
@@ -325,6 +329,8 @@ Attr. Parameter + Sonnenantwort je Fläche).
   Raum in der Ruhezeit), zählt für den Block davor und beendet seine Zehrzeit nicht (`_last_open`). Anlass: Abend-Block
   lud einen Raum mit Ruhezeit 19–07 nur auf 20,6 °C, nachts 19,5 °C unter 20,0 – die Unterschreitung galt als Sache
   des nächsten Blocks und kostete keinen etwas.
+  v0.9.7: Frostschutz-Pumpe ist kein Heizen (Panel zeigte Nacht-Block ohne Brenner, `q_on` fiel Wohnzimmer 19 → 5,4,
+  der Planer rechnete mit viel zu schwachen Blöcken); einmalige `q_on`-Reparatur beim Start.
 - Bekannte Schwächen:
   - Prognose nutzt aktuelle Nachbartemperaturen als konstant über den Horizont (Gewinne: Tagesprofil, s. o.).
   - Ein Gerät, das kühlt (z. B. Klimagerät im Sommer), meldet als Leistungssensor positive Watt – Gewinne sind ≥ 0;
