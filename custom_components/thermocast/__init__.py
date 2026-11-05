@@ -56,6 +56,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ThermocastConfigEntry) -
         entry.async_create_background_task(
             hass, coordinator.async_warmstart(only_fresh=True), "thermocast_warmstart"
         )
+    if not coordinator.q_on_repaired:
+        entry.async_create_background_task(hass, coordinator.async_repair_q_on(), "thermocast_q_on_repair")
     return True
 
 

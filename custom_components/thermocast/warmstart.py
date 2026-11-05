@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 from functools import partial
 from statistics import fmean
 from typing import TYPE_CHECKING
@@ -19,16 +19,19 @@ from .const import (
     CONF_HEATING_ACTIVE,
     CONF_NEIGHBOR_SENSORS,
     CONF_OUTDOOR_SENSOR,
+    CONF_RELEASE_ENTITY,
+    CONF_RELEASE_OFF,
+    CONF_RELEASE_ON,
     CONF_TEMP_SENSORS,
     CONF_VALVE_ENTITY,
     CONF_WINDOW_ENTITIES,
     DEFAULT_FORGETTING,
 )
 from .core.forecast import fetch_forecast
-from .core.model import OnlineZoneModel
+from .core.model import OnlineZoneModel, update_q_on
 from .core.quality import merge_logs
-from .core.rules import binary_value, hvac_heating
-from .core.series import hourly_fraction, hourly_mean, mask_off
+from .core.rules import binary_value, hvac_heating, release_value
+from .core.series import hourly_fraction, hourly_mean, mask_off, without_idle_circulation
 from .core.view import align
 from .core.warmstart import WarmstartInputs, build_records, warm_train
 from .core.weather import OutdoorBias
@@ -41,6 +44,58 @@ _LOGGER = logging.getLogger(__name__)
 WARMSTART_DAYS = 30  # Open-Meteo serves up to 92 past days; the RLS forgets after ~10 days anyway
 MIN_LEARNED_HOURS = 24
 HOUR = timedelta(hours=1)
+Q_ON_REPAIR_DAYS = 14  # the hour log
+
+
+def _heating_share(coordinator: ThermocastCoordinator, states, hours, end) -> list[float | None]:
+    """Share of each hour with space heating: the pump, without hot water charging and idle circulation."""
+    cfg = coordinator.config_entry.data
+    dhw_eid = coordinator.config_entry.options.get(CONF_DHW_ENTITY)
+    pump = states.get(cfg[CONF_HEATING_ACTIVE], [])
+    flow = states.get(cfg.get(CONF_FLOW_TEMP_SENSOR), [])
+    if dhw_eid:  # hot water charging runs the same pump with a hot flow – not space heating
+        pump = mask_off(pump, states.get(dhw_eid, []), binary_value)
+        flow = mask_off(flow, states.get(dhw_eid, []), binary_value)
+    rel = cfg.get(CONF_RELEASE_ENTITY)
+
+    def rel_value(s: str) -> float | None:
+        return release_value(s, rel, cfg.get(CONF_RELEASE_ON), cfg.get(CONF_RELEASE_OFF))
+
+    return without_idle_circulation(
+        hourly_fraction(pump, hours, end, binary_value),
+        hourly_fraction(states.get(rel, []), hours, end, rel_value),
+        hourly_mean(flow, hours, end),
+    )
+
+
+async def async_repair_q_on(coordinator: ThermocastCoordinator) -> bool:
+    """Replay q_on over the hour logs with the hours the pump really heated. Returns False to try again."""
+    hass = coordinator.hass
+    cfg = coordinator.config_entry.data
+    if not cfg.get(CONF_HEATING_ACTIVE):
+        return True  # no pump signal: frost protection could not count as a block hour
+    if "recorder" not in hass.config.components:
+        return False
+    end = dt_util.utcnow().replace(minute=0, second=0, microsecond=0)
+    start = end - timedelta(days=Q_ON_REPAIR_DAYS)
+    hours = [start + i * HOUR for i in range(Q_ON_REPAIR_DAYS * 24)]
+    ids = {
+        cfg[CONF_HEATING_ACTIVE], cfg.get(CONF_RELEASE_ENTITY), cfg.get(CONF_FLOW_TEMP_SENSOR),
+        coordinator.config_entry.options.get(CONF_DHW_ENTITY),
+    }
+    states = await async_fetch_states(hass, {e for e in ids if e}, start, end)
+    if states is None:
+        return False
+    share = dict(zip(hours, _heating_share(coordinator, states, hours, end), strict=True))
+    for z in coordinator.zones.values():
+        q_on = None
+        for entry in z.log.to_list():
+            q = entry["rec"].get("q")
+            if q is not None:
+                q_on = update_q_on(q_on, q, share.get(datetime.fromisoformat(entry["t"])) or 0.0)
+        if q_on is not None:
+            z.q_on = q_on
+    return True
 
 
 async def async_warmstart(coordinator: ThermocastCoordinator, only_fresh: bool) -> dict[str, int]:
@@ -64,7 +119,9 @@ async def async_warmstart(coordinator: ThermocastCoordinator, only_fresh: bool) 
 
     numeric_ids: set[str] = {e for e in (cfg.get(CONF_OUTDOOR_SENSOR), cfg.get(CONF_FLOW_TEMP_SENSOR)) if e}
     dhw_eid = coordinator.config_entry.options.get(CONF_DHW_ENTITY)
-    binary_ids: set[str] = {e for e in (cfg.get(CONF_HEATING_ACTIVE), dhw_eid) if e}
+    binary_ids: set[str] = {e for e in (cfg.get(CONF_HEATING_ACTIVE), cfg.get(CONF_RELEASE_ENTITY), dhw_eid) if e}
+    if cfg.get(CONF_HEATING_ACTIVE) and cfg.get(CONF_FLOW_TEMP_SENSOR):
+        binary_ids.add(cfg[CONF_FLOW_TEMP_SENSOR])  # raw states: the hour's flow without hot water charges
     for z in targets.values():
         numeric_ids |= set(z.cfg.get(CONF_TEMP_SENSORS, [])) | set(z.cfg.get(CONF_NEIGHBOR_SENSORS, []))
         numeric_ids |= set(z.cfg.get(CONF_GAIN_ENTITIES, []))
@@ -119,12 +176,7 @@ async def async_warmstart(coordinator: ThermocastCoordinator, only_fresh: bool) 
         offset = coordinator.outdoor_bias.offset_fn()  # a gap in the sensor is filled in the sensor's language
         t_out = [m if m is not None else (f + offset(h) if f is not None else None) for h, m, f in zip(hours, t_out, t_fc)]
     flow = numeric(cfg.get(CONF_FLOW_TEMP_SENSOR))
-    heating = None
-    if cfg.get(CONF_HEATING_ACTIVE):
-        pump = states.get(cfg[CONF_HEATING_ACTIVE], [])
-        if dhw_eid:  # hot water charging runs the same pump with a hot flow – not space heating
-            pump = mask_off(pump, states.get(dhw_eid, []), binary_value)
-        heating = hourly_fraction(pump, hours, end, binary_value)
+    heating = _heating_share(coordinator, states, hours, end) if cfg.get(CONF_HEATING_ACTIVE) else None
     forgetting = float(coordinator.config_entry.options.get(CONF_FORGETTING, DEFAULT_FORGETTING))
 
     result: dict[str, int] = {}

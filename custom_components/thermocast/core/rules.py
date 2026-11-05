@@ -120,6 +120,12 @@ _ON = frozenset({"on", "true", "an", "ein", "yes", "ja"})
 _OFF = frozenset({"off", "false", "aus", "no", "nein"})
 
 
+def release_value(value: str | None, entity_id: str, on_value: str | None, off_value: str | None) -> float | None:
+    """``release_state`` as 1.0 / 0.0 for hourly shares, None if unknown."""
+    v = release_state(value, entity_id.split(".")[0], on_value, off_value)
+    return None if v is None else float(v)
+
+
 def binary_value(value: str | None) -> float | None:
     """on/off or numeric (> 0 = on) state -> 1.0 / 0.0, None if unknown.
 

@@ -121,3 +121,39 @@ async def test_without_history_the_prior_stays(hass: HomeAssistant, mock_entry: 
     zr = mock_entry.runtime_data.zones["zone_eg"]
     assert zr.model.n_updates == 0
     assert "warmstart" not in [e["type"] for e in mock_entry.runtime_data.events.to_list()]
+
+
+async def test_q_on_repair_skips_frost_protection_hours(
+    hass: HomeAssistant, mock_entry: MockConfigEntry, history, freezer, hass_storage
+) -> None:
+    """q_on dragged down by frost protection pump hours is rebuilt once from the log + recorder, without them."""
+    freezer.move_to("2026-11-04 08:00:00+00:00")
+    await _setup_states(hass)
+    hass.states.async_set("input_number.summer_threshold", "16.0")
+    hass.states.async_set("binary_sensor.heating_pump", "on")
+    hass.states.async_set("sensor.flow", "40.0", {"device_class": "temperature"})
+    await async_wait_recording_done(hass)
+    freezer.move_to("2026-11-04 10:00:00+00:00")
+    hass.states.async_set("input_number.summer_threshold", "10.0")
+    hass.states.async_set("sensor.flow", "23.0", {"device_class": "temperature"})
+    await async_wait_recording_done(hass)
+    freezer.move_to("2026-11-04 14:05:00+00:00")
+    await _setup_entry(hass, mock_entry)
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    c = mock_entry.runtime_data
+    z = c.zones["zone_eg"]
+    hours = [("08", 18.0), ("09", 20.0), ("10", 3.0), ("11", 3.0), ("12", 2.5), ("13", 2.5)]
+    z.log.load([
+        {"t": f"2026-11-04T{h}:00:00+00:00", "rec": {"q": q}, "temp_next": 20.0, "err": 0.0} for h, q in hours
+    ])
+    z.q_on = 5.0
+    c.q_on_repaired = False
+    await c.async_repair_q_on()
+    assert z.q_on == pytest.approx(0.8 * 18.0 + 0.2 * 20.0)
+
+    z.q_on = 5.0  # only once: later hours are clean anyway
+    await c.async_repair_q_on()
+    assert z.q_on == 5.0
+    await c.async_save()
+    assert hass_storage[f"{DOMAIN}.{mock_entry.entry_id}"]["data"]["q_on_repaired"] is True

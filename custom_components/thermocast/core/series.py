@@ -8,6 +8,8 @@ from itertools import pairwise
 
 StateSeries = list[tuple[datetime, str]]
 HOUR = timedelta(hours=1)
+# Below this flow no boiler heat arrives (the water just takes on the screed's temperature, ~22–25 °C)
+IDLE_FLOW_MAX = 28.0
 
 
 def _float(value: str) -> float | None:
@@ -98,6 +100,18 @@ def hourly_fraction(
 ) -> list[float | None]:
     """Share of each hour in which ``value_of(state)`` is 1 (on)."""
     return _hourly(series, hours, end, value_of)
+
+
+def without_idle_circulation(
+    heating: list[float | None], release: list[float | None], flow: list[float | None]
+) -> list[float | None]:
+    """Hourly heating share without hours in which the pump only circulated: frost protection runs it below
+    its outdoor limit, release off and burner off. A hot flow counts: some release values still let the
+    controller heat when it is cold. An unknown release or flow keeps the hour."""
+    return [
+        0.0 if h is not None and r is not None and f is not None and r < 0.5 and f < IDLE_FLOW_MAX else h
+        for h, r, f in zip(heating, release, flow, strict=True)
+    ]
 
 
 def _hour_of(t: datetime) -> datetime:

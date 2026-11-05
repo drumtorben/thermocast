@@ -8,7 +8,7 @@ import pytest
 
 from . import core_helpers  # noqa: F401
 from core.rules import binary_value
-from core.series import HourlyIntegral, hourly_fraction, hourly_mean, mask_off
+from core.series import IDLE_FLOW_MAX, HourlyIntegral, hourly_fraction, hourly_mean, mask_off, without_idle_circulation
 
 T0 = datetime(2026, 10, 3, 22, tzinfo=UTC)
 HOURS = [T0 + timedelta(hours=i) for i in range(4)]
@@ -138,3 +138,16 @@ def test_hourly_integral_needs_some_coverage_when_asked():
     q.set(_m(60), 1.0)
     assert q.mean(T0) == 1.0
     assert q.mean(T0, min_covered=timedelta(minutes=15)) is None
+
+
+def test_circulation_without_release_and_with_a_cold_flow_is_no_heating() -> None:
+    cold, hot = IDLE_FLOW_MAX - 5, IDLE_FLOW_MAX + 15
+    heating = [1.0, 1.0, 1.0, 1.0, 0.5, None]
+    release = [0.0, 1.0, 0.0, None, 0.0, 0.0]
+    flow = [cold, cold, hot, cold, None, cold]
+    # frost protection | block in a burner pause | controller heats although blocked | unknown release/flow keep
+    assert without_idle_circulation(heating, release, flow) == [0.0, 1.0, 1.0, 1.0, 0.5, None]
+
+
+def test_idle_circulation_needs_a_release_signal() -> None:
+    assert without_idle_circulation([1.0], [None], [20.0]) == [1.0]

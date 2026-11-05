@@ -317,6 +317,32 @@ async def test_dhw_charging_is_not_space_heating(hass: HomeAssistant, mock_entry
     assert z.log.to_list()[-1]["rec"]["q"] > 40
 
 
+async def test_frost_protection_pump_is_not_space_heating(hass: HomeAssistant, mock_entry, mock_open_meteo, freezer) -> None:
+    """Release off, burner off, the pump circulates a cold flow (frost protection): no heat, no block hour."""
+    freezer.move_to("2026-10-04 10:05:00+00:00")
+    mock_open_meteo(5.0)
+    await _setup_states(hass)
+    hass.states.async_set("input_number.summer_threshold", "10.0")
+    hass.states.async_set("binary_sensor.heating_pump", "on")
+    hass.states.async_set("sensor.flow", "23.5", {"device_class": "temperature"})
+    await _setup_entry(hass, mock_entry)
+    z = mock_entry.runtime_data.zones["zone_eg"]
+    q_on = z.q_on
+
+    freezer.move_to("2026-10-04 11:05:00+00:00")
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert z.log.to_list()[-1]["rec"]["q"] == 0.0
+    assert z.q_on == q_on
+
+    # the controller heats although blocked (release "Auto" below its threshold): a hot flow still counts
+    hass.states.async_set("sensor.flow", "40.0", {"device_class": "temperature"})
+    freezer.move_to("2026-10-04 12:05:00+00:00")
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert z.log.to_list()[-1]["rec"]["q"] > 15
+
+
 async def test_outdoor_sensor_offset_moves_the_forecast(
     hass: HomeAssistant, mock_entry, mock_open_meteo, freezer, hass_storage
 ) -> None:

@@ -45,3 +45,52 @@ async def test_view_built_with_recorder(hass: HomeAssistant, mock_entry, mock_op
     assert view["decision"]["rules"]["max_switches"] == 12
     assert view["candidates"]
     assert view["weather"]["irr"][0]["label"] == "East"
+
+
+async def test_view_frost_protection_pump_is_no_heating(hass: HomeAssistant, mock_entry, mock_open_meteo, freezer) -> None:
+    freezer.move_to("2026-10-04 08:30:00+00:00")
+    await _setup_states(hass)
+    hass.states.async_set("input_number.summer_threshold", "10.0")
+    hass.states.async_set("binary_sensor.heating_pump", "on")
+    hass.states.async_set("sensor.flow", "23.5", {"device_class": "temperature"})
+    await async_wait_recording_done(hass)
+    freezer.tick(timedelta(minutes=65))  # 09:35
+    mock_open_meteo(-5.0)
+    await _setup_entry(hass, mock_entry)
+
+    view = mock_entry.runtime_data.view
+    i8 = view["hours"].index("2026-10-04T08:00:00+00:00")
+    assert view["heating"]["actual"][i8] == 0.0  # the pump ran, nothing heated
+    assert view["days"][1]["heat_hours"] == 0.0
+
+
+async def test_view_hot_water_charge_does_not_hide_a_frost_protection_hour(
+    hass: HomeAssistant, mock_entry, mock_open_meteo, freezer
+) -> None:
+    """A 15-min charge at 75 °C lifts the hour's mean flow above the limit; the circulation still heats nothing."""
+    from custom_components.thermocast.const import CONF_DHW_ENTITY
+
+    freezer.move_to("2026-10-04 08:00:00+00:00")
+    await _setup_states(hass)
+    hass.states.async_set("input_number.summer_threshold", "10.0")
+    hass.states.async_set("binary_sensor.heating_pump", "on")
+    hass.states.async_set("binary_sensor.dhw_charging", "off")
+    hass.states.async_set("sensor.flow", "23.5", {"device_class": "temperature"})
+    await async_wait_recording_done(hass)
+    freezer.move_to("2026-10-04 08:30:00+00:00")
+    hass.states.async_set("binary_sensor.dhw_charging", "on")
+    hass.states.async_set("sensor.flow", "75.0", {"device_class": "temperature"})
+    await async_wait_recording_done(hass)
+    freezer.move_to("2026-10-04 08:45:00+00:00")
+    hass.states.async_set("binary_sensor.dhw_charging", "off")
+    hass.states.async_set("sensor.flow", "23.5", {"device_class": "temperature"})
+    await async_wait_recording_done(hass)
+    freezer.move_to("2026-10-04 09:35:00+00:00")
+    mock_open_meteo(-5.0)
+    mock_entry.add_to_hass(hass)
+    hass.config_entries.async_update_entry(mock_entry, options={CONF_DHW_ENTITY: "binary_sensor.dhw_charging"})
+    await _setup_entry(hass, mock_entry)
+
+    view = mock_entry.runtime_data.view
+    i8 = view["hours"].index("2026-10-04T08:00:00+00:00")
+    assert view["heating"]["actual"][i8] == 0.0

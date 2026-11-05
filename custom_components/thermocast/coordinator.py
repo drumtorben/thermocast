@@ -50,6 +50,9 @@ from .const import (
     CONF_QUIET_FROM,
     CONF_QUIET_SCHEDULE,
     CONF_QUIET_TO,
+    CONF_RELEASE_ENTITY,
+    CONF_RELEASE_OFF,
+    CONF_RELEASE_ON,
     CONF_STARTS_WEIGHT,
     CONF_SURFACES,
     CONF_TEMP_SENSORS,
@@ -83,11 +86,12 @@ from .core.rules import (
     binary_value,
     hvac_heating,
     next_on_hours,
+    release_value,
     trim_tail_restart,
     window_recovering,
     window_recovery_temp,
 )
-from .core.series import HourlyIntegral
+from .core.series import IDLE_FLOW_MAX, HourlyIntegral
 from .core.vacation import AWAY, Vacation
 from .core.weather import OutdoorBias
 from .events import EventLog
@@ -341,7 +345,18 @@ def heating_inputs(
         heating = True
     if _is_on(hass, options.get(CONF_DHW_ENTITY)):
         heating = False  # combi boiler: hot water charging runs the same pump with a hot flow
+    if heating and flow is not None and flow < IDLE_FLOW_MAX and not _release_allowed(hass, data):
+        heating = False  # frost protection: the pump circulates, the burner stays off
     return heating, flow
+
+
+def _release_allowed(hass: HomeAssistant, data: Mapping[str, Any]) -> bool:
+    """False only if the release entity says blocked (unknown or not configured: allowed)."""
+    eid = data.get(CONF_RELEASE_ENTITY)
+    state = hass.states.get(eid) if eid else None
+    if state is None:
+        return True
+    return release_value(state.state, eid, data.get(CONF_RELEASE_ON), data.get(CONF_RELEASE_OFF)) != 0.0
 
 
 def zone_q(hass: HomeAssistant, z: ZoneRuntime, temp: float, heating: bool | None, flow: float | None) -> float:
@@ -459,6 +474,7 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
         self.control_since: datetime | None = None
         self._started = dt_util.utcnow()  # startup grace: sensors may come back a little later
         self._warmstart_running = False
+        self.q_on_repaired = False
         self.warmstart_pending = False  # a zone starts from its prior: hold the release until the warm start
         self._failsafe_since: datetime | None = None
         self._failsafe_issue = False
@@ -514,6 +530,7 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
             self._recalibrate(zr)
             zr.vacation = self.vacation
             self.zones[subentry.subentry_id] = zr
+        self.q_on_repaired = bool(stored.get("q_on_repaired"))
         cs = stored.get("control_since")
         self.control_since = datetime.fromisoformat(cs) if cs else None
         outdoor = stored.get("outdoor") or {}
@@ -579,6 +596,7 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
             "bt": self.zone_actuator.to_dict(),
             "events": self.events.to_list(),
             "control_since": self.control_since.isoformat() if self.control_since else None,
+            "q_on_repaired": self.q_on_repaired,
             "outdoor": {
                 "bias": self.outdoor_bias.to_dict(),
                 "hour": self._outdoor_hour.isoformat() if self._outdoor_hour else None,
@@ -730,7 +748,10 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
     def async_track_heat(self) -> CALLBACK_TYPE:
         """Follow the heating inputs by state change: the heating proxy is time-weighted per hour."""
         data, options = self.config_entry.data, self.config_entry.options
-        ids = {data.get(CONF_FLOW_TEMP_SENSOR), data.get(CONF_HEATING_ACTIVE), options.get(CONF_DHW_ENTITY)}
+        ids = {
+            data.get(CONF_FLOW_TEMP_SENSOR), data.get(CONF_HEATING_ACTIVE), data.get(CONF_RELEASE_ENTITY),
+            options.get(CONF_DHW_ENTITY),
+        }
         for z in self.zones.values():
             ids.add(z.cfg.get(CONF_VALVE_ENTITY))
             ids.update(z.cfg.get(CONF_TEMP_SENSORS, []))
@@ -779,6 +800,21 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
             # the next requested refresh (e.g. switching control on right after the setup)
             await self.async_refresh()
         return result
+
+    async def async_repair_q_on(self) -> None:
+        """Once: rebuild q_on, dragged down by frost protection hours before 0.9.7 (see warmstart.py). Never raises."""
+        from .warmstart import async_repair_q_on
+
+        if self.q_on_repaired:
+            return
+        try:
+            self.q_on_repaired = await async_repair_q_on(self)
+        except Exception:
+            _LOGGER.exception("Thermocast: repairing q_on failed")
+            return
+        if self.q_on_repaired:
+            await self.async_save()
+            await self.async_refresh()
 
     @property
     def view(self) -> dict[str, Any] | None:

@@ -21,6 +21,7 @@ from .const import (
     CONF_BURNER_STARTS,
     CONF_CONFIDENCE_Z,
     CONF_DHW_ENTITY,
+    CONF_FLOW_TEMP_SENSOR,
     CONF_GAIN_ENTITIES,
     CONF_HEAT_TYPE,
     CONF_HEATING_ACTIVE,
@@ -45,8 +46,8 @@ from .core.model import Prediction
 from .core.planner import charge_cost
 from .core.quality import hindcast
 from .core.rollout import ActuatorState, block_lengths_for
-from .core.rules import apply_rules, binary_value, hold_until, next_on_hours, release_state
-from .core.series import hourly_fraction, hourly_increase, hourly_mean, mask_off
+from .core.rules import apply_rules, binary_value, hold_until, next_on_hours, release_value
+from .core.series import hourly_fraction, hourly_increase, hourly_mean, mask_off, without_idle_circulation
 from .core.view import ZoneViewInput, align, build_view, compute_outlook, make_window
 from .history import async_fetch_attribute, async_fetch_states
 
@@ -251,7 +252,10 @@ class ViewBuilder:
         outdoor, pump, rel = cfg.get(CONF_OUTDOOR_SENSOR), cfg.get(CONF_HEATING_ACTIVE), cfg.get(CONF_RELEASE_ENTITY)
         dhw_eid = c.config_entry.options.get(CONF_DHW_ENTITY)
         starts_eid = c.config_entry.options.get(CONF_BURNER_STARTS)
-        wanted = {e for lst in sensors.values() for e in lst} | {outdoor, pump, rel, planner_eid, dhw_eid, starts_eid}
+        flow_eid = cfg.get(CONF_FLOW_TEMP_SENSOR)
+        wanted = {e for lst in sensors.values() for e in lst} | {
+            outdoor, pump, rel, planner_eid, dhw_eid, starts_eid, flow_eid,
+        }
 
         states = await async_fetch_states(hass, {e for e in wanted if e}, hours[0], now)
         if states is None:
@@ -266,19 +270,22 @@ class ViewBuilder:
         def fraction_of(eid: str | None, value_of) -> list[float | None]:
             return hourly_fraction(states.get(eid, []), hours, now, value_of) if eid else [None] * n
 
-        rel_domain = rel.split(".")[0] if rel else ""
-
         def rel_value(s: str) -> float | None:
-            v = release_state(s, rel_domain, cfg.get(CONF_RELEASE_ON), cfg.get(CONF_RELEASE_OFF))
-            return None if v is None else float(v)
+            return release_value(s, rel, cfg.get(CONF_RELEASE_ON), cfg.get(CONF_RELEASE_OFF))
 
-        release = [None if f is None else f >= 0.5 for f in fraction_of(rel, rel_value)]
+        release_share = fraction_of(rel, rel_value)
+        release = [None if f is None else f >= 0.5 for f in release_share]
         planner = [None if f is None else f >= 0.5 for f in fraction_of(planner_eid, binary_value)]
         # the boiler pump also runs for hot water: that time is not space heating
         pump_states = states.get(pump, []) if pump else []
         if dhw_eid and pump_states:
             pump_states = mask_off(pump_states, states.get(dhw_eid, []), binary_value)
         heating_actual = hourly_fraction(pump_states, hours, now, binary_value) if pump else [None] * n
+        # a hot water charge must not lift the hour's flow above the limit
+        flow_states = states.get(flow_eid, []) if flow_eid else []
+        if dhw_eid and flow_states:
+            flow_states = mask_off(flow_states, states.get(dhw_eid, []), binary_value)
+        heating_actual = without_idle_circulation(heating_actual, release_share, hourly_mean(flow_states, hours, now))
         t_meas = mean_of(outdoor)
 
         # ------------------------------------------------------------ forecast
