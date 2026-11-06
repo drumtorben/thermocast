@@ -293,17 +293,26 @@ def _open_hours(zz: ZonePlanInput, free: Prediction) -> list[bool]:
     return [(c := zz.cap_at(i)) is None or start_temp[i] < c for i in range(len(zz.future))]
 
 
-def _last_open(zones: list[ZonePlanInput], free: dict[str, Prediction]) -> dict[str, list[int]]:
-    """Per zone and hour the latest hour up to it in which the zone takes heat (−1: none). A violation whose last
-    open hour lies before a block's end cannot be the next block's job – e.g. a room in its quiet time (thermostat
-    off) only the block before the quiet time can charge."""
-    out: dict[str, list[int]] = {}
+def _later_lift(zones: list[ZonePlanInput], free: dict[str, Prediction]) -> dict[str, np.ndarray]:
+    """Per zone how much of a violation a next block could still prevent (rows: end of this block, columns: hours).
+    A next block starts ``MIN_COAST_H`` after this one at the earliest. Is the zone's thermostat shut in some hour
+    between then and the violation (e.g. a room in its quiet time), the next block only lifts it as far as heating
+    every open hour from then on does; the rest stays with the block before – also with one ending an hour before
+    the quiet time. Without a shut hour in between the violation is the next block's job (inf)."""
+    out: dict[str, np.ndarray] = {}
     for zz in zones:
-        last, run = -1, []
-        for i, o in enumerate(_open_hours(zz, free[zz.name])):
-            last = i if o else last
-            run.append(last)
-        out[zz.name] = run
+        n = len(zz.future)
+        hours = np.arange(n)
+        first = np.minimum(np.arange(n + 1) + MIN_COAST_H, n)  # earliest start of a next block per end
+        open_ = np.array(_open_hours(zz, free[zz.name]))
+        later = (hours[None, :] >= first[:, None]) & open_
+        shut = np.concatenate([[0], np.cumsum(~open_)])  # shut hours before each hour
+        blocked = (hours[None, :] >= first[:, None]) & (shut[None, 1:] - shut[first][:, None] > 0)
+        if not blocked.any():
+            out[zz.name] = np.full((n + 1, n), np.inf)
+            continue
+        mean, _ = zz.predict_batch(np.where(later, zz.q_on, 0.0))
+        out[zz.name] = np.where(blocked, np.maximum(0.0, mean - np.array(free[zz.name].mean)), np.inf)
     return out
 
 
@@ -346,7 +355,7 @@ def plan(
         )
 
     reach = _reachable(leading, free, horizon)
-    last_open = _last_open(leading, free)
+    lift = _later_lift(leading, free) if coast_mode else {}
 
     def lead_violations(zz: ZonePlanInput, pred: Prediction) -> list[tuple[int, float]]:
         return [(i, d) for i, d in violations(pred, zz.comfort_low, z) if i in reach[zz.name]]
@@ -392,8 +401,11 @@ def plan(
             if zz.leads_release:
                 preds[zz.name] = pred
                 for i, d in lead_violations(zz, pred):
-                    if cand.start is not None and i >= end and last_open[zz.name][i] < end:
-                        own += d
+                    if cand.start is not None and i >= end and coast_mode:
+                        later = min(d, float(lift[zz.name][end, i]))  # the part a next block could still prevent
+                        own += d - later
+                        if later > 0.0:
+                            viol.append((i, later))
                     else:
                         viol.append((i, d))
             if zz.name in bounded_names:

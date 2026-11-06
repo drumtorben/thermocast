@@ -316,3 +316,37 @@ def test_violation_in_quiet_time_stays_with_the_block_before_it():
     best = plan([room], cost_fn=charge_cost(0.0), z=0.0)
     assert best.best.start is not None and best.best.start + best.best.length <= 4  # charges before the quiet time
     assert best.ranked[0].violation < late.violation  # longer: less of the night below comfort
+
+
+def _quiet_room(quiet_from: int) -> ZonePlanInput:
+    """Radiator room, thermostat off from ``quiet_from`` for 12 h with night comfort 20.0 (like a child's room 19–07)."""
+    room = _zone(t_out=0.0, temp=20.3, hours=24, radiator=True)
+    rest = 24 - quiet_from - 12
+    return type(room)(**{
+        **room.__dict__, "name": "ph",
+        "comfort_low": [None] * quiet_from + [20.0] * 12 + [None] * rest,
+        "charge_cap": [21.0] * quiet_from + [15.0] * 12 + [21.0] * rest,
+    })
+
+
+def test_every_block_before_the_quiet_time_pays_for_its_night():
+    """Real case (0.9.7): a block ending an hour before the quiet time paid nothing for the night below comfort – the
+    one open hour left counted as "the next block's job", but a next block comes 2 h later at the earliest, when the
+    thermostat is already off. The block that charged until the quiet time paid the full violation and lost."""
+    room = _quiet_room(4)
+    res = plan([room], block_lengths=(2,), cost_fn=charge_cost(0.0), z=0.0)
+    for start in (0, 1, 2):
+        s = next(s for s in res.ranked if s.candidate.start == start)
+        night = sum(d for i, d in violations(s.preds["ph"], room.comfort_low, 0.0) if i >= 4)
+        assert night > 0
+        assert s.violation >= night - 1e-9, start  # no later block can heat the room for the night
+
+
+def test_a_later_block_takes_only_what_it_can_lift():
+    """A next block with one open hour before the quiet time warms the night a little: only that part is its job,
+    the rest stays with the block before."""
+    room = _quiet_room(5)
+    res = plan([room], block_lengths=(2,), cost_fn=charge_cost(0.0), z=0.0)
+    early = next(s for s in res.ranked if s.candidate.start == 0)  # ends at 2, a next block from 4: one open hour
+    night = sum(d for i, d in violations(early.preds["ph"], room.comfort_low, 0.0) if i >= 5)
+    assert 0.0 < early.violation < night
