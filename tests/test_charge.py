@@ -350,3 +350,17 @@ def test_a_later_block_takes_only_what_it_can_lift():
     early = next(s for s in res.ranked if s.candidate.start == 0)  # ends at 2, a next block from 4: one open hour
     night = sum(d for i, d in violations(early.preds["ph"], room.comfort_low, 0.0) if i >= 5)
     assert 0.0 < early.violation < night
+
+
+def test_a_later_block_is_held_at_the_cap_too():
+    """Real case (0.9.8): heating every open hour before the quiet time without the thermostat's cap looked like a full
+    night's charge, so a running block passed the night on to a later block and ran on two hours for nothing. A later
+    block can only charge the room up to its cap – the rest of the night stays with this block."""
+    from core.planner import _later_lift
+
+    room = _quiet_room(10)
+    room = type(room)(**{**room.__dict__, "temp_now": 20.9})  # just below the cap of 21
+    free = {"ph": room.predict(room.future)}
+    lift = _later_lift([room], free)["ph"]
+    night = [f + x for f, x in zip(free["ph"].mean[10:22], lift[0, 10:22])]  # the quiet time
+    assert max(night) <= 21.2  # charged to the cap at most (+ the heat lagged in the radiator), not 21.75

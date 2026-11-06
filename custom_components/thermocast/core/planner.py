@@ -297,22 +297,36 @@ def _later_lift(zones: list[ZonePlanInput], free: dict[str, Prediction]) -> dict
     """Per zone how much of a violation a next block could still prevent (rows: end of this block, columns: hours).
     A next block starts ``MIN_COAST_H`` after this one at the earliest. Is the zone's thermostat shut in some hour
     between then and the violation (e.g. a room in its quiet time), the next block only lifts it as far as heating
-    every open hour from then on does; the rest stays with the block before – also with one ending an hour before
-    the quiet time. Without a shut hour in between the violation is the next block's job (inf)."""
+    from then on does, with the thermostat closing at its cap like in a real block; the rest stays with the block
+    before – also with one ending an hour before the quiet time. Without a shut hour in between the violation is the
+    next block's job (inf). Uncapped, three hours of heat before the quiet time looked like a full night's charge and
+    an early block passed the night on (real case: a block ran on to 14:00 instead of stopping at 12:00)."""
     out: dict[str, np.ndarray] = {}
     for zz in zones:
         n = len(zz.future)
         hours = np.arange(n)
         first = np.minimum(np.arange(n + 1) + MIN_COAST_H, n)  # earliest start of a next block per end
         open_ = np.array(_open_hours(zz, free[zz.name]))
-        later = (hours[None, :] >= first[:, None]) & open_
         shut = np.concatenate([[0], np.cumsum(~open_)])  # shut hours before each hour
         blocked = (hours[None, :] >= first[:, None]) & (shut[None, 1:] - shut[first][:, None] > 0)
         if not blocked.any():
             out[zz.name] = np.full((n + 1, n), np.inf)
             continue
-        mean, _ = zz.predict_batch(np.where(later, zz.q_on, 0.0))
-        out[zz.name] = np.where(blocked, np.maximum(0.0, mean - np.array(free[zz.name].mean)), np.inf)
+        # the model is linear in q: row h = what a full hour of heat in hour h adds to every hour
+        base = np.array(free[zz.name].mean)
+        gain = zz.predict_batch(np.eye(n) * zz.q_on)[0] - base
+        start0 = np.concatenate([[zz.temp_now], base[:-1]])
+        lift = np.zeros((n + 1, n))
+        for h in range(n):  # heat hour by hour from each earliest start, closing at the cap (as in the rollout)
+            share = (hours[h] >= first).astype(float)
+            if (cap := zz.cap_at(h)) is not None:
+                end_without = base[h] + lift[:, h]
+                start = start0[h] + (lift[:, h - 1] if h else 0.0)
+                share *= start < cap
+                if gain[h, h] > 0:
+                    share *= np.clip((cap - end_without) / gain[h, h], 0.0, 1.0)
+            lift += share[:, None] * gain[h][None, :]
+        out[zz.name] = np.where(blocked, np.maximum(0.0, lift), np.inf)
     return out
 
 
