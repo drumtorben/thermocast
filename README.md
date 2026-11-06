@@ -14,7 +14,7 @@ Predictive heating release for Home Assistant – with **room models that learn 
 oversized boiler run long and rarely instead of short and often.
 Built for underfloor heating (slow screed) plus radiators; a heat pump is the next target.
 
-> Status: v0.7 – 184 tests (synthetic test house + Home Assistant); running on a real system since October 2026
+> Status: v0.9 – 289 tests (synthetic test house + Home Assistant); running on a real system since October 2026
 > (gas condensing boiler, Buderus RC310 via EMS-ESP, underfloor heating + radiators with Better Thermostat).
 > Still young – feedback and issues welcome.
 > **Starts in observe mode** and switches nothing until you turn on `Control active`.
@@ -53,7 +53,7 @@ every 15 min:  read sensors ──► hour finished? ──► RLS update per zo
 |---|---|---|
 | `I_s` window | irradiance on the window surface | 0–1 h |
 | `I_s` roof | irradiance on the roof surface (delayed by the insulation) | 1–6 h |
-| `Q` underfloor | heating proxy (flow − room while the heating pump runs) | 0–6 h (screed) |
+| `Q` underfloor | heating proxy (flow − room while the heating pump runs), time-weighted over state changes | 0–6 h (screed) |
 | `Q` radiator | proxy × valve share (thermostat `hvac_action`) | 0–1 h |
 | `T_n` | neighbouring rooms | – |
 | `G_g` | internal gains (power sensors, presence), learned relative to their largest value so far | – |
@@ -64,6 +64,11 @@ sign projection (sun/heating/losses ≥ 0), Huber clipping against outliers, a c
 `mean − z·σ`, so an uncertain model heats earlier. In the forecast an internal gain fades from its current value
 into its typical value for that hour of day (time constant 3 h, profile from the 14-day hour log) – a dehumidifier
 that runs now is not assumed to run for three days.
+
+**Heating proxy:** `Q` is averaged over every state change of flow, pump, hot water and room sensor within the hour,
+not from four samples – with a cycling burner those were off by up to 75 %. Hot-water charges don't count as space
+heating (option). Neither does the controller's **frost protection**: below its frost limit the RC310 runs the pump
+with the burner off; while the release is surely off and the flow stays below 28 °C, such hours are not heating.
 
 **Weather:** every Open-Meteo request asks two weather models – `best_match` (ICON of the DWD in Germany) and
 ECMWF IFS. The outdoor temperature is their mean, **moved onto your outdoor sensor**: a sensor on a wall reads
@@ -111,6 +116,16 @@ heat at once. Optionally Thermocast sets each zone's **Better Thermostat** targe
 bound otherwise), with **quiet times** (fixed and/or a `schedule` helper) without valve noise, and it respects
 manual changes.
 
+- **Charge only when needed:** a thermostat zone charges up to its upper bound in a block only if it would
+  otherwise drop below its lower bound within the next 24 h, and only during comfort time or within the
+  **precharge** lead before it (option, default 12 h) – not in the last 3 h of comfort time. Otherwise it holds its
+  lower bound. The valve closes within the hour once the target is reached (the plan counts that hour partly).
+- **Quiet time:** 15 min before it starts, Thermocast switches Better Thermostat **off** (a target alone didn't stop
+  the valve motor). Only a room more than 1 K below its base temperature is heated during quiet time.
+- **Who pays for the night:** a room in quiet time can't be heated, so a drop below its lower bound at night is
+  charged to the last block before the quiet time – that block charges the room up. Drops that no block could
+  prevent (the room is closed until then) don't pull a block forward.
+
 - **Open window** (window entities of the zone): the zone does not call for a block, takes no heat in the plan,
   and its thermostat holds the base temperature. Airing cools the air, not the walls: for an hour after closing
   the plan starts from the temperature before the window opened, so a short airing does not trigger a block.
@@ -137,7 +152,9 @@ Set **Vacation departure** and **Vacation return** (house device, `datetime`); i
 - Choose the lead by the weather: floor heating gains only a few tenths of a kelvin per hour. On the synthetic house
   12 h are enough at +5 °C but leave the return ~1 K short at −5 °C – take a longer lead or a higher lower bound
   when it is cold. The panel shows the forecast for the return.
-- Fail-safes, minimum block/pause and EEPROM protection stay as they are; the models keep learning.
+- Fail-safes, minimum block/pause and EEPROM protection stay as they are; the models keep learning. One exception:
+  if the weather forecast is lost while away and every zone is measured and ≥ 2 K above its floor, the release
+  just holds instead of heating.
 - Hot water is not part of it – use the controller's own holiday program (RC310: holiday mode).
 - To cancel, set the return to now (or into the past); a past period is simply inactive.
 
@@ -190,6 +207,7 @@ changes the release. Panel texts: English and German.
 
 * Observe mode is the default.
 * Turning heating on is always allowed; turning it off only after the minimum block and within the daily budget.
+  If the planner wants the next block before the minimum pause would end, the heating stays on (no 2 h lock-out).
 * Update error, forecast older than 2 h, missing sensor of a leading zone → release **on**.
   A fail-safe lasting more than 1 h raises a repair issue.
 * Unloading/removing the integration or switching control off → release **on** (a reload after a config change
@@ -228,7 +246,11 @@ Project notes for contributors (German): [`CLAUDE.md`](CLAUDE.md).
 - [x] Charge and coast: upper/lower bound, coast time, Better Thermostat control, quiet times
 - [x] Blocks preferably with many open consumers; window-aware; block end matched to the anti-cycling lock
 - [x] Internal gains forecast by daily profile (current value fading into the typical one)
+- [x] Two weather models, forecast corrected onto the outdoor sensor, weather σ from their spread
+- [x] Vacation mode (lowered floor, preheat lead)
+- [x] Thermostat zones charge only when needed; the block before a quiet time pays for the night
 - [ ] House power as a gain signal; gain profile per weekday
+- [ ] Neighbour temperatures forecast over the horizon (today: held constant)
 - [ ] Presence (`zone.home`) in comfort
 - [ ] Two-state model (air + thermal mass) or a smoothed solar signal
 - [ ] Raise the curve during a block (charge the screed on purpose)

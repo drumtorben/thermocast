@@ -14,7 +14,7 @@ Vorausschauende Heizfreigabe für Home Assistant – mit **online lernenden Raum
 überdimensionierte Kessel lange und selten statt kurz und oft laufen lässt.
 Ausgelegt für Fußbodenheizung (träger Estrich) + Heizkörper, später Wärmepumpe.
 
-> Status: v0.7 – 184 Tests (synthetisches Testhaus + HA); seit Oktober 2026 im Betrieb an einer echten Anlage
+> Status: v0.9 – 289 Tests (synthetisches Testhaus + HA); seit Oktober 2026 im Betrieb an einer echten Anlage
 > (Gas-Brennwertkessel, Buderus RC310 über EMS-ESP, Fußbodenheizung + Heizkörper mit Better Thermostat).
 > Noch jung – Feedback und Issues willkommen.
 > **Startet im Beobachtungsmodus** und schaltet nichts, bis du `Steuerung aktiv` einschaltest.
@@ -42,15 +42,30 @@ alle 15 min:  Sensoren lesen ──► Stunde abgeschlossen? ──► RLS-Updat
 |---|---|---|
 | `I_s` Fenster | Einstrahlung auf die Fensterfläche | 0–1 h |
 | `I_s` Dach | Einstrahlung auf die Dachfläche (wirkt durch Dämmung verzögert) | 1–6 h |
-| `Q` FBH | Heiz-Proxy (Vorlauf − Raum, wenn Heizung aktiv) | 0–6 h (Estrich) |
-| `Q` Heizkörper | Proxy × Ventilöffnung | 0–1 h |
+| `Q` FBH | Heiz-Proxy (Vorlauf − Raum, solange die Heizungspumpe läuft), zeitgewichtet über Zustandswechsel | 0–6 h (Estrich) |
+| `Q` Heizkörper | Proxy × Ventilanteil (Thermostat-`hvac_action`) | 0–1 h |
 | `T_n` | Nachbarräume | – |
-| `G_g` | innere Gewinne (W-Sensoren, Anwesenheit) | – |
+| `G_g` | innere Gewinne (W-Sensoren, Anwesenheit), gelernt relativ zum bisher größten Wert | – |
 
 **Online-Lernen:** Recursive Least Squares mit Vergessensfaktor (Standard 0,996/h ≈ 10 Tage
 Gedächtnis), Vorzeichen-Projektion (Sonne/Heizen/Verluste ≥ 0), Huber-Clipping gegen Ausreißer,
 Kovarianz-Deckel gegen „Wind-up“ im Sommer. Stunden mit offenem Fenster oder Datenlücken werden
-nicht gelernt. Der Planer rechnet mit `Mittelwert − z·σ` → unsicheres Modell heizt eher.
+nicht gelernt. Der Planer rechnet mit `Mittelwert − z·σ` → unsicheres Modell heizt eher. In der Prognose klingt
+ein innerer Gewinn vom aktuellen Wert zu seinem typischen Wert dieser Tagesstunde ab (Zeitkonstante 3 h, Profil aus
+dem 14-Tage-Stundenlog) – ein Entfeuchter, der gerade läuft, läuft nicht drei Tage lang weiter.
+
+**Heiz-Proxy:** `Q` wird über alle Zustandswechsel von Vorlauf, Pumpe, Warmwasser und Raumfühler innerhalb der
+Stunde gemittelt, nicht aus vier Stichproben – bei taktendem Brenner lagen die um bis zu 75 % daneben.
+Warmwasser-Ladungen zählen nicht als Raumheizung (Option), der **Frostschutz** des Reglers auch nicht: Unter seiner
+Frostgrenze lässt das RC310 die Pumpe bei ausgeschaltetem Brenner laufen; solange die Freigabe sicher aus ist und der
+Vorlauf unter 28 °C bleibt, gelten solche Stunden nicht als Heizen.
+
+**Wetter:** Jede Open-Meteo-Abfrage fragt zwei Wettermodelle – `best_match` (in Deutschland ICON des DWD) und
+ECMWF IFS. Die Außentemperatur ist ihr Mittel, **verschoben auf deinen Außenfühler**: Ein Fühler an der Wand misst
+wärmer als die 2-m-Lufttemperatur der Modelle (oft 1–2 K, mittags mehr), und die Zonenmodelle haben mit dem Fühler
+gelernt. Der Versatz wird je Tagesstunde gelernt (etwa die letzte Woche; beim Einrichten aus der Recorder-Historie).
+Wo die Modelle auseinanderliegen, wächst das σ der Prognose – für die Außentemperatur und für die Sonne je Fläche
+(über die gelernten Koeffizienten, über die Stunden aufsummiert). Der Tab *Modell* zeigt Versatz und Abstand.
 
 **Warum kein Reinforcement Learning?** Ein Haus liefert ein paar hundert Entscheidungen pro
 Saison; RL bräuchte Größenordnungen mehr und müsste dafür „ausprobieren“ (= frieren).
@@ -93,6 +108,16 @@ zählen als zusätzliche Starts – Blöcke landen bevorzugt dort, wo viele Räu
 Optional setzt Thermocast je Zone den Sollwert von **Better Thermostat** (im Block die Obergrenze, sonst die
 Untergrenze), mit **Ruhezeiten** (fest und/oder `schedule`-Helfer) ohne Stellgeräusche und Respekt vor Handeingriffen.
 
+- **Laden nur bei Bedarf:** Eine Thermostat-Zone lädt im Block nur dann bis zur Obergrenze, wenn sie sonst in den
+  nächsten 24 h unter ihre Untergrenze fiele, und nur in der Komfortzeit oder im **Vorladen**-Vorlauf davor (Option,
+  Standard 12 h) – nicht in den letzten 3 h der Komfortzeit. Sonst hält sie ihre Untergrenze. Ist das Ziel erreicht,
+  schließt das Ventil innerhalb der Stunde (der Plan rechnet die Stunde anteilig).
+- **Ruhezeit:** 15 min vor Beginn schaltet Thermocast Better Thermostat **aus** (ein Sollwert allein hielt den
+  Ventilmotor nicht still). Nur ein Raum mehr als 1 K unter seinem Grundwert wird in der Ruhezeit geheizt.
+- **Wer zahlt für die Nacht:** Ein Raum in der Ruhezeit lässt sich nicht heizen – fällt er nachts unter seine
+  Untergrenze, geht das auf den letzten Block vor der Ruhezeit, der den Raum dafür auflädt. Unterschreitungen, die
+  kein Block verhindern kann (der Raum ist bis dahin zu), ziehen keinen Block nach vorn.
+
 - **Offenes Fenster** (Fenster-Entitäten der Zone): die Zone löst keinen Block aus, nimmt im Plan keine Wärme
   und ihr Thermostat bleibt auf dem Grundwert – gelüftet wird nicht gegen die Heizung. Lüften kühlt die Luft,
   nicht die Wände: Eine Stunde nach dem Schließen plant Thermocast ab der Temperatur vor dem Öffnen, kurzes
@@ -107,6 +132,23 @@ Untergrenze), mit **Ruhezeiten** (fest und/oder `schedule`-Helfer) ohne Stellger
   Kurve liegt der Soll-Vorlauf an milden Tagen oft kaum über der Raumtemperatur – dann zündet der Brenner im Block
   gar nicht. Abhilfe: Fußpunkt der Kurve anheben (z. B. ~30–35 °C bei +20 °C außen). Zwischen den Blöcken ist der
   Heizkreis ohnehin gesperrt, der höhere Fußpunkt wirkt also praktisch nur im Block.
+
+### Urlaub
+
+**Urlaub Abreise** und **Urlaub Rückkehr** (Haus-Gerät, `datetime`) setzen; der Urlaub beginnt und endet von selbst.
+
+- **Abwesend:** keine Komfortzeit, jede Zone hält nur die **Urlaub-Untergrenze** (Standard 15 °C – sie senkt den
+  Grundwert einer Zone, hebt ihn nie an); Blöcke laden nicht über sie + 1 K. Thermostate (Better Thermostat) folgen.
+- **Vorlauf** (Standard 12 h): ab Rückkehr − Vorlauf gilt wieder der normale Grundwert, ab der Rückkehr der
+  Komfortplan. Der Planer heizt so vor, dass der Grundwert ab Beginn des Vorlaufs hält.
+- Vorlauf nach dem Wetter wählen: Fußbodenheizung schafft nur wenige Zehntel Kelvin pro Stunde. Im synthetischen
+  Haus reichen 12 h bei +5 °C, bei −5 °C fehlt bei Rückkehr ~1 K – bei Kälte längerer Vorlauf oder höhere
+  Untergrenze. Das Panel zeigt die Prognose für die Rückkehr.
+- Fail-safes, Mindestblock/-pause und EEPROM-Schutz bleiben, die Modelle lernen weiter. Eine Ausnahme: Fällt im
+  Urlaub die Wetterprognose aus und ist jede Zone gemessen und ≥ 2 K über ihrer Untergrenze, hält die Freigabe
+  ihren Zustand, statt zu heizen.
+- Warmwasser gehört nicht dazu – dafür das Urlaubsprogramm des Reglers nutzen (RC310: Urlaubsmodus).
+- Abbrechen: Rückkehr auf jetzt (oder in die Vergangenheit) setzen; ein vergangener Zeitraum ist einfach inaktiv.
 
 ### Beispiel-Zonen (Flächen als YAML im Feld „Sonnenbeschienene Flächen“)
 
@@ -132,7 +174,9 @@ Küche, `Führt die Freigabe` = an.
 |---|---|
 | `switch.…_steuerung_aktiv` | aus = Beobachtungsmodus (Standard), Freigabe bleibt „erlaubt“ |
 | `binary_sensor.…_heizfreigabe` | Entscheidung des Planers (auch im Beobachtungsmodus) |
-| `sensor.…_nachster_heizblock` | Start (Attribut: Ende, Prognose-Alter, Fail-safe-Grund) |
+| `sensor.…_nachster_heizblock` | Start des nächsten Blocks laut Rollout (Attribut: Ende, Prognose-Alter, Fail-safe-Grund) |
+| `datetime.…_urlaub_abreise/_ruckkehr`, `number.…_urlaub_*` | Urlaubszeitraum, Untergrenze, Vorlauf |
+| `binary_sensor.…_urlaub` | Urlaub aktiv (Attribut `phase`: `away`/`preheat`) |
 | `sensor.<zone>_prognose_minimum` | tiefste erwartete Temperatur (untere Grenze) ohne Heizen, Attribut `forecast` = Verlauf |
 | `binary_sensor.<zone>_heizbedarf` | Zone fällt ohne Heizen unter ihr Komfortband |
 | `sensor.<zone>_modellfehler` | laufender MAE (K/h), Attribute: Parameter, Sonnenantwort je Fläche |
@@ -199,6 +243,7 @@ series:
 
 * Beobachtungsmodus ist Standard.
 * Einschalten der Heizung ist immer erlaubt; Ausschalten nur nach Mindestblock und im Tagesbudget.
+  Will der Planer den nächsten Block vor Ende der Mindestpause, bleibt die Heizung an (keine 2-h-Sperre).
 * Fehler im Update, Prognose älter als 2 h, fehlender Sensor einer führenden Zone → Freigabe **an**.
   Dauert ein Fail-safe länger als 1 h, erscheint ein Reparaturhinweis.
 * Entladen/Entfernen der Integration oder Ausschalten der Steuerung → Freigabe **an**
@@ -212,7 +257,7 @@ series:
 
 * **Warmstart:** Neue Zonen lernen beim Einrichten aus den letzten **30 Tagen** Recorder-Langzeitstatistik
   (+ Einstrahlung aus Open-Meteo-Vergangenheitsdaten) statt mit Standardwerten zu starten. Der Button
-  *„Modelle aus Historie neu lernen“* wiederholt das für alle Zonen.
+  *„Modelle aus Historie neu lernen“* wiederholt das für alle Zonen (und lernt den Außenfühler-Versatz neu).
 * **σ-Kalibrierung** (Option, Standard an): Aus den beobachteten Prognosefehlern der letzten 14 Tage wird je
   Horizont ein Faktor gelernt, um den der Planer die Unsicherheit weitet (nie verengt). Sichtbar im Modell-Tab („σ ×“).
 * **Komfort-Zeitplan:** Je Zone optional ein Zeitplan-Helfer (`schedule.*`), z. B. Büro werktags 8–17 Uhr.
@@ -273,7 +318,12 @@ Im Notebook: `sys.path.insert(0, "custom_components/thermocast")`, dann `from co
 - [x] Diagnostics-Download, Repairs (Fail-safe, EEPROM-Schreibschutz)
 - [x] „Laden & Zehren“: Ober-/Untergrenze, Zehrzeit, Better-Thermostat-Steuerung, Ruhezeiten
 - [x] Blöcke bevorzugt bei vielen offenen Abnehmern; fensterbewusst; Blockende passend zur Taktsperre
-- [ ] Innere Gewinne nach Tagesprofil prognostizieren (dann Hausstrom als Gewinn-Signal)
+- [x] Innere Gewinne nach Tagesprofil prognostizieren (aktueller Wert klingt zum typischen ab)
+- [x] Zwei Wettermodelle, Prognose auf den Außenfühler korrigiert, Wetter-σ aus ihrem Abstand
+- [x] Urlaubsmodus (abgesenkte Untergrenze, Vorlauf vor der Rückkehr)
+- [x] Thermostat-Zonen laden nur bei Bedarf; der Block vor einer Ruhezeit zahlt für die Nacht
+- [ ] Hausstrom als Gewinn-Signal; Gewinn-Profil je Wochentag
+- [ ] Nachbartemperaturen über den Horizont prognostizieren (heute konstant)
 - [ ] Anwesenheit (`zone.home`) im Komfort
 - [ ] Zwei-Zustands-Modell (Luft + Speichermasse) bzw. geglättetes Sonnensignal
 - [ ] Kurvenanhebung während eines Blocks (Estrich gezielt laden)
