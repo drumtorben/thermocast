@@ -228,7 +228,7 @@ Attr. Parameter + Sonnenantwort je Fläche).
 
 ---
 
-## 4. Status (v0.9.7)
+## 4. Status (v0.9.8)
 
 - ✅ Kern getestet auf synthetischen Daten: 1-Schritt-MAE ≈ 0,03 K/h, 24-h-Prognose-MAE ≈ 0,1 K,
   Ostfenster und Süddach werden getrennt gelernt, Planer heizt bei −5 °C, nicht bei 18 °C.
@@ -331,6 +331,13 @@ Attr. Parameter + Sonnenantwort je Fläche).
   des nächsten Blocks und kostete keinen etwas.
   v0.9.7: Frostschutz-Pumpe ist kein Heizen (Panel zeigte Nacht-Block ohne Brenner, `q_on` fiel Wohnzimmer 19 → 5,4,
   der Planer rechnete mit viel zu schwachen Blöcken); einmalige `q_on`-Reparatur beim Start.
+  v0.9.8: jeder Block vor einer Ruhezeit zahlt für die Nacht (`_later_lift` ersetzt `_last_open`): ein nächster Block
+  beginnt frühestens `MIN_COAST_H` nach Blockende; ist die Zone zwischen dann und der Unterschreitung irgendwann zu,
+  gilt nur der Teil als seine Sache, den Heizen in allen offenen Stunden ab dann anhebt, der Rest bleibt beim Block
+  davor (ohne zu Stunde dazwischen wie bisher: nächster Block). Anlass: Block 16–18 Uhr (Ruhe ab 19) zahlte 0 K·h für
+  die Nacht unter 20,0 – die eine offene Stunde galt als Sache des nächsten Blocks; 16–19 zahlte voll und verlor.
+  Nachgerechnet (Raum mit Komfort 19–07 = Ruhezeit, Obergrenze 21): kein Block hält ihn über 20 (morgens ~19,2),
+  Kalt-Gewicht ×3 oder Obergrenze 22 ändern < 0,1 K – das braucht Wärme in der Nacht (Idee: Ventil offen statt BT aus).
 - Bekannte Schwächen:
   - Prognose nutzt aktuelle Nachbartemperaturen als konstant über den Horizont (Gewinne: Tagesprofil, s. o.).
   - Ein Gerät, das kühlt (z. B. Klimagerät im Sommer), meldet als Leistungssensor positive Watt – Gewinne sind ≥ 0;
