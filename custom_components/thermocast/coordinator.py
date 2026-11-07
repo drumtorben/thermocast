@@ -48,6 +48,7 @@ from .const import (
     CONF_OUTDOOR_SENSOR,
     CONF_PRECHARGE_H,
     CONF_QUIET_FROM,
+    CONF_QUIET_OPEN,
     CONF_QUIET_SCHEDULE,
     CONF_QUIET_TO,
     CONF_RELEASE_ENTITY,
@@ -185,6 +186,9 @@ class ZoneRuntime:
     precharge_h: int = DEFAULT_PRECHARGE_H  # house option: charge in a block when comfort starts within this
     # per planned hour (UTC start): would the zone fall below its lower bound soon without heating? (unknown = yes)
     charge_need: dict[datetime, bool] = field(default_factory=dict)
+    # "valve open" in quiet time: per planned quiet hour (UTC start) open or shut, and the running quiet time's decision
+    quiet_open: dict[datetime, bool] = field(default_factory=dict)
+    quiet_decided: bool | None = None  # set by the zone actuator, kept to the end of the quiet time
     vacation: Vacation = field(default_factory=Vacation)  # house-wide, set by the coordinator
     # airing (window entities, tracked by state change – a short airing often falls between two updates)
     window_open: bool = False
@@ -321,7 +325,33 @@ def zone_charge_cap(z: ZoneRuntime, when: datetime) -> float | None:
     None = no thermostat control (the zone takes what it gets)."""
     if not z.cfg.get(CONF_BT_CONTROL):
         return None
-    return zone_base(z, when) if zone_quiet(z, when) else zone_charge_target(z, when)
+    if not zone_quiet(z, when):
+        return zone_charge_target(z, when)
+    if zone_quiet_valve_open(z, when):
+        return None  # the valve stays open all quiet time: the zone takes what a block gives
+    return zone_base(z, when)
+
+
+def zone_quiet_valve_open(z: ZoneRuntime, when: datetime) -> bool:
+    """A "valve open" zone keeps its valve open in this (planned) quiet hour."""
+    return bool(z.cfg.get(CONF_QUIET_OPEN)) and z.quiet_open.get(when.replace(minute=0, second=0, microsecond=0), False)
+
+
+def _quiet_open_plan(z: ZoneRuntime, starts: list[datetime], low: set[int]) -> dict[datetime, bool]:
+    """Per planned quiet hour: is the valve open? One decision per quiet time – open if the zone falls below its lower
+    bound in it without heating (``low``: hours whose end is too cold); a quiet time running or starting within the hour
+    keeps the actuator's decision once made (``z.quiet_decided``)."""
+    out: dict[datetime, bool] = {}
+    quiet = [zone_quiet(z, t) for t in starts]
+    for h in range(len(starts)):
+        if not quiet[h] or (h and quiet[h - 1]):
+            continue
+        end = next((k for k in range(h, len(starts)) if not quiet[k]), len(starts))
+        is_open = any(k in low for k in range(h, end))
+        if h <= 1 and z.quiet_decided is not None:
+            is_open = z.quiet_decided
+        out.update({starts[k]: is_open for k in range(h, end)})
+    return out
 
 
 def zone_window_open(hass: HomeAssistant, z: ZoneRuntime) -> bool:
@@ -400,7 +430,7 @@ def build_plan_inputs(
     for sid, z in zones.items():
         temp = zone_temp(hass, z)
         if temp is None:
-            z.charge_need = {}
+            z.charge_need, z.quiet_open = {}, {}
             continue
         # just aired: the drop is the air, not the stored heat – plan from the temperature before the airing
         temp = window_recovery_temp(temp, z.window_before, z.window_closed, now)
@@ -438,6 +468,8 @@ def build_plan_inputs(
             z.charge_need = {
                 t: any(k in low for k in range(h, h + CHARGE_NEED_H)) for h, t in enumerate(starts)
             }
+            if z.cfg.get(CONF_QUIET_OPEN):
+                z.quiet_open = _quiet_open_plan(z, starts, low)
         caps = [zone_charge_cap(z, t) for t in starts]
         zi.charge_cap = [zone_base(z, t) if window and c is not None else c for c, t in zip(caps, starts)]
         inputs.append(zi)

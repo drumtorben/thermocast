@@ -247,3 +247,57 @@ async def test_switched_on_by_hand_in_quiet_time_is_an_override(hass: HomeAssist
         block_on=False, failsafe=False, enabled=True,
     )
     assert out["kid"]["reason"] == "override" and modes == []
+
+
+async def test_quiet_open_decides_once_and_stays_silent(hass: HomeAssistant) -> None:
+    """Valve open in quiet time: the decision 15 min before holds the whole quiet time – open (maximum, written once)
+    or shut (off); a shut room colder than base − 1 K opens once and stays open; morning: normal control again."""
+    from datetime import UTC, datetime
+
+    from homeassistant.util import dt as dt_util
+
+    from custom_components.thermocast.const import CONF_QUIET_FROM, CONF_QUIET_OPEN, CONF_QUIET_TO
+    from custom_components.thermocast.coordinator import ZoneRuntime
+    from custom_components.thermocast.core.model import OnlineZoneModel, ZoneSpec
+    from custom_components.thermocast.events import EventLog
+    from custom_components.thermocast.zone_actuator import ZoneActuator
+
+    from .conftest import ZONE_DATA
+
+    data = {**ZONE_DATA, CONF_BT_CONTROL: True, CONF_BT_ENTITY: BT, CONF_BASE_TEMP: 17.0, CONF_QUIET_OPEN: True,
+            CONF_QUIET_FROM: "19:00:00", CONF_QUIET_TO: "07:00:00"}
+    z = ZoneRuntime("kid", "Kind", data, OnlineZoneModel(ZoneSpec()))
+    hass.states.async_set(BT, "heat", {"temperature": 20.0})
+    temps = async_mock_service(hass, "climate", "set_temperature")
+    modes = async_mock_service(hass, "climate", "set_hvac_mode")
+    act = ZoneActuator(hass, EventLog())
+    act.load({"kid": {"last_written": 20.0}})
+    tz = dt_util.get_time_zone(hass.config.time_zone)
+
+    def at(day: int, hour: int, minute: int = 0) -> datetime:
+        return datetime(2026, 10, day, hour, minute, tzinfo=tz)
+
+    async def run(now: datetime, temp: float | None = 20.3, block: bool = False) -> str:
+        out = await act.async_apply({"kid": z}, {"kid": temp}, now=now, block_on=block, failsafe=False, enabled=True)
+        return out["kid"]["reason"]
+
+    z.quiet_open = {at(12, 19).astimezone(UTC): True}
+    assert await run(at(12, 18, 45)) == "open" and temps[-1].data["temperature"] == 24.0 and z.quiet_decided is True
+    hass.states.async_set(BT, "heat", {"temperature": 24.0})
+    z.quiet_open = {}  # a later forecast without need does not change tonight's decision
+    for when, temp, block in ((at(12, 22), 20.0, True), (at(13, 2), None, False), (at(13, 6, 45), 21.5, True)):
+        assert await run(when, temp, block) == "quiet_open"
+    assert len(temps) == 1 and modes == []
+    assert await run(at(13, 7)) == "write" and temps[-1].data["temperature"] != 24.0  # morning: normal again
+    assert z.quiet_decided is None
+    hass.states.async_set(BT, "heat", {"temperature": temps[-1].data["temperature"]})
+
+    z.quiet_open = {at(13, 19).astimezone(UTC): False}
+    assert await run(at(13, 18, 45)) == "off" and [c.data["hvac_mode"] for c in modes] == ["off"]
+    hass.states.async_set(BT, "off", {})
+    assert await run(at(13, 23), 16.5) == "quiet"  # base − 1 K not reached: shut and silent
+    n = len(temps)
+    assert await run(at(14, 1), 15.9) == "open" and temps[-1].data["temperature"] == 24.0  # colder: open once
+    hass.states.async_set(BT, "heat", {"temperature": 24.0})
+    assert await run(at(14, 3), 17.5) == "quiet_open" and len(temps) == n + 1
+    assert "bt_override" not in [e["type"] for e in act.events.to_list()]

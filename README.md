@@ -122,6 +122,9 @@ manual changes.
   lower bound. The valve closes within the hour once the target is reached (the plan counts that hour partly).
 - **Quiet time:** 15 min before it starts, Thermocast switches Better Thermostat **off** (a target alone didn't stop
   the valve motor). Only a room more than 1 K below its base temperature is heated during quiet time.
+  Zone option **valve open in quiet time when needed**: decided once before each quiet time – if the room would drop
+  below its lower bound in it, the thermostat goes to its maximum instead and the valve stays fully open until the end
+  (heat whenever a block runs, no motor moves; the planner sees the room as uncapped). Nothing is written in between.
 - **Who pays for the night:** a room in quiet time can't be heated, so a drop below its lower bound at night is
   charged to the last block before the quiet time – that block charges the room up. Drops that no block could
   prevent (the room is closed until then) don't pull a block forward.

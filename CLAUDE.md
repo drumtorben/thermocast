@@ -216,6 +216,13 @@ für die Wärmepumpe später COP(T_out, Vorlauf), Strompreis, PV-Überschuss.
   den Motor bewegt; Sollwert allein half nicht), dann nichts; Ausnahme: Raum < Grundwert − 1 K oder Temperatur
   unbekannt → an auf Grundwert, aus erst wieder ab Grundwert; von Hand eingeschaltet = Handeingriff;
   Steuerung aus/Entladen/Update-Fehler → an, Untergrenze (`hand_back`).
+  **Ventil offen in der Ruhezeit** (Zonen-Option `quiet_open`, v0.10.0): statt „BT aus“ einmal vor der Ruhezeit
+  entschieden (`BtZoneState.quiet_open`, bis Ruhezeitende fest): fällt der freie Verlauf in dieser Ruhezeit unter die
+  Untergrenze (`z.quiet_open` je Stunde, `_quiet_open_plan`), BT auf 24 (gesättigter TRVZB bewegt den Motor nicht), sonst
+  aus; danach nichts mehr – keine Kälte-Ausnahme, nur ein zu kalter Raum (< Grundwert − 1 K) öffnet einmal. Planer: offene
+  Ruhezeit ungedeckelt (`charge_cap` None), laufende Ruhezeit nimmt die Aktor-Entscheidung (`z.quiet_decided`).
+  Testnacht 06./07.11. (von Hand, 24 °C): keine Motorbewegung, Raum 20,0–20,6 statt 19,1–19,7, Preis 3 Nachtblöcke/4 Starts/
+  ~23 kWh – die FBH-Zonen heizen mit.
 
 ### Entitäten
 
@@ -228,7 +235,7 @@ Attr. Parameter + Sonnenantwort je Fläche).
 
 ---
 
-## 4. Status (v0.9.9)
+## 4. Status (v0.10.0)
 
 - ✅ Kern getestet auf synthetischen Daten: 1-Schritt-MAE ≈ 0,03 K/h, 24-h-Prognose-MAE ≈ 0,1 K,
   Ostfenster und Süddach werden getrennt gelernt, Planer heizt bei −5 °C, nicht bei 18 °C.
@@ -342,6 +349,8 @@ Attr. Parameter + Sonnenantwort je Fläche).
   linear in q → Wirkung je Heizstunde einmal per `predict_batch`). Ungedeckelt sahen 3 h Heizen vor der Ruhezeit wie eine
   ganze Nachtladung aus, ein laufender Block reichte die Nacht weiter und lief 2 h länger (12 → 14 Uhr) für nichts.
   `heating_batch` taugt dafür nicht als Maßstab: nach dem Überschießen bleibt dort das Ventil zu (s. v0.9.3).
+  v0.10.0: Zonen-Option „Ventil in der Ruhezeit offen bei Bedarf“ (`quiet_open`, s. BT-Aktor): eine Entscheidung je
+  Ruhezeit, offen = BT 24 und im Planer ungedeckelt, nachts keine Motorbewegung; Panel zeigt 24 und „Ventil offen“.
 - Bekannte Schwächen:
   - Prognose nutzt aktuelle Nachbartemperaturen als konstant über den Horizont (Gewinne: Tagesprofil, s. o.).
   - Ein Gerät, das kühlt (z. B. Klimagerät im Sommer), meldet als Leistungssensor positive Watt – Gewinne sind ≥ 0;

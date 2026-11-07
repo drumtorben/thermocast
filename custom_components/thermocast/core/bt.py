@@ -5,8 +5,11 @@ temperature when comfort is far away or about to end); otherwise it is held at i
 time, the base temperature outside). Quiet time: the thermostat is switched off shortly before (Better
 Thermostat keeps sending the room temperature to the TRV, and a regulating TRV answers that with valve
 noise; an off TRV stays shut and quiet), then nothing is written – unless the room gets cold (base − 1 K: on
-at the base until the base is reached again) or the temperature is unknown. ``hand_back`` (control off,
-unload, update error) always switches back on.
+at the base until the base is reached again) or the temperature is unknown. A zone with "valve open" in quiet time
+(``quiet_open``) gets one decision per quiet time instead: open (the highest target – a saturated TRV does not move its
+motor) or shut (off), and nothing in between (a shut room colder than base − 1 K is opened by the caller, once).
+``hand_back`` (control off, unload, update error)
+always switches back on.
 """
 from __future__ import annotations
 
@@ -37,12 +40,23 @@ class BtInput:
     window_open: bool = False  # a window of the zone is open: hold the base, never charge
     last_off: bool = False  # Thermocast switched the thermostat off (quiet time)
     hand_back: bool = False  # control off / unload / update error: thermostat on, at its lower bound
+    quiet_open: bool | None = None  # this quiet time's decision: valve open / shut (None: the zone does not use it)
 
 
 def bt_decide(inp: BtInput) -> tuple[float | None, str]:
     """(target to write or None, reason code). Reason ``off``: switch the thermostat off (target None);
     any target means: on (again) at that target."""
     quiet = inp.quiet_now or inp.quiet_soon
+    if quiet and not inp.hand_back and inp.quiet_open is not None:
+        if inp.quiet_open:
+            if not inp.last_off and inp.last_written == MAX_TARGET:
+                return None, "quiet_open"
+            if not inp.last_off and inp.writes_today >= MAX_WRITES_PER_DAY:
+                return None, "budget"
+            return MAX_TARGET, "open"
+        if inp.last_off:
+            return None, "quiet"
+        return (None, "budget") if inp.writes_today >= MAX_WRITES_PER_DAY else (None, "off")
     if quiet and not inp.hand_back and inp.temp is not None:
         # off ↔ on with hysteresis: off from the base up, on again below base − 1 K
         warm = inp.temp >= inp.base - (COLD_MARGIN if inp.last_off else 0.0)

@@ -78,7 +78,8 @@
             "bt_entity": "Better Thermostat entity",
             "quiet_from": "Quiet time from",
             "quiet_to": "Quiet time until",
-            "quiet_schedule": "Quiet-time schedule (optional)"
+            "quiet_schedule": "Quiet-time schedule (optional)",
+            "quiet_open": "Valve open in quiet time when needed"
           },
           "data_description": {
             "surfaces": "YAML list, e.g. [{kind: window, azimuth: 90, tilt: 90}, {kind: roof, azimuth: 180, tilt: 40}]. Azimuth: 0=N, 90=E, 180=S, 270=W.",
@@ -92,7 +93,8 @@
             "bt_control": "Thermocast sets the target of this room's Better Thermostat: upper bound during a block, otherwise the lower bound. Disable Better Thermostat schedules/automations for this room.",
             "bt_entity": "The climate entity of Better Thermostat (not the TRV itself).",
             "quiet_from": "The thermostat is switched off 15 min before the quiet time and left alone during it (Better Thermostat keeps sending the room temperature, a regulating valve answers with noise). On again at the end, or at the base temperature when the room falls 1 K below it.",
-            "quiet_schedule": "A schedule helper for more quiet windows, e.g. nap 12:30–14:30 and night 19–07, also per weekday. Quiet when this schedule OR the from/until window is on."
+            "quiet_schedule": "A schedule helper for more quiet windows, e.g. nap 12:30–14:30 and night 19–07, also per weekday. Quiet when this schedule OR the from/until window is on.",
+            "quiet_open": "Decided once before each quiet time: if the room would fall below its lower bound in it, the thermostat goes to its maximum and the valve stays open the whole quiet time (heat only when the boiler is released, no motor moves); otherwise off as usual. Nothing is written during the quiet time."
           }
         },
         "reconfigure": {
@@ -118,7 +120,8 @@
             "bt_entity": "Better Thermostat entity",
             "quiet_from": "Quiet time from",
             "quiet_to": "Quiet time until",
-            "quiet_schedule": "Quiet-time schedule (optional)"
+            "quiet_schedule": "Quiet-time schedule (optional)",
+            "quiet_open": "Valve open in quiet time when needed"
           },
           "data_description": {
             "surfaces": "YAML list, e.g. [{kind: window, azimuth: 90, tilt: 90}, {kind: roof, azimuth: 180, tilt: 40}]. Azimuth: 0=N, 90=E, 180=S, 270=W.",
@@ -132,7 +135,8 @@
             "bt_control": "Thermocast sets the target of this room's Better Thermostat: upper bound during a block, otherwise the lower bound. Disable Better Thermostat schedules/automations for this room.",
             "bt_entity": "The climate entity of Better Thermostat (not the TRV itself).",
             "quiet_from": "The thermostat is switched off 15 min before the quiet time and left alone during it (Better Thermostat keeps sending the room temperature, a regulating valve answers with noise). On again at the end, or at the base temperature when the room falls 1 K below it.",
-            "quiet_schedule": "A schedule helper for more quiet windows, e.g. nap 12:30–14:30 and night 19–07, also per weekday. Quiet when this schedule OR the from/until window is on."
+            "quiet_schedule": "A schedule helper for more quiet windows, e.g. nap 12:30–14:30 and night 19–07, also per weekday. Quiet when this schedule OR the from/until window is on.",
+            "quiet_open": "Decided once before each quiet time: if the room would fall below its lower bound in it, the thermostat goes to its maximum and the valve stays open the whole quiet time (heat only when the boiler is released, no motor moves); otherwise off as usual. Nothing is written during the quiet time."
           }
         }
       },

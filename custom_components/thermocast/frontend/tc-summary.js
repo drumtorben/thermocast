@@ -87,6 +87,7 @@ class TcSummary extends LitElement {
       if (b.reason === "override")
         notes.push(t(L, "bt_override_until", { zone: name, until: fmtTime(b.override_until, L, this.tz) }));
       else if (b.reason === "quiet" || b.reason === "off") notes.push(t(L, "bt_quiet_note", { zone: name }));
+      else if (b.reason === "quiet_open" || b.reason === "open") notes.push(t(L, "bt_quiet_open_note", { zone: name }));
       else if (b.reason === "unavailable") notes.push(t(L, "bt_unavailable", { zone: name }));
       const high = z?.comfort_high?.[now];
       if (b.target !== null && high !== null && high !== undefined && Math.abs(b.target - high) < 0.3)

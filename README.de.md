@@ -114,6 +114,9 @@ Untergrenze), mit **Ruhezeiten** (fest und/oder `schedule`-Helfer) ohne Stellger
   schließt das Ventil innerhalb der Stunde (der Plan rechnet die Stunde anteilig).
 - **Ruhezeit:** 15 min vor Beginn schaltet Thermocast Better Thermostat **aus** (ein Sollwert allein hielt den
   Ventilmotor nicht still). Nur ein Raum mehr als 1 K unter seinem Grundwert wird in der Ruhezeit geheizt.
+  Zonen-Option **Ventil in der Ruhezeit offen bei Bedarf**: einmal vor jeder Ruhezeit entschieden – fiele der Raum darin
+  unter seine Untergrenze, geht das Thermostat stattdessen auf Maximum und das Ventil bleibt bis zum Ende ganz offen
+  (Wärme, sobald ein Block läuft, keine Motorbewegung; der Planer sieht den Raum ungedeckelt). Dazwischen wird nichts geschrieben.
 - **Wer zahlt für die Nacht:** Ein Raum in der Ruhezeit lässt sich nicht heizen – fällt er nachts unter seine
   Untergrenze, geht das auf den letzten Block vor der Ruhezeit, der den Raum dafür auflädt. Unterschreitungen, die
   kein Block verhindern kann (der Raum ist bis dahin zu), ziehen keinen Block nach vorn.

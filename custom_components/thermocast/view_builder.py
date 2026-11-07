@@ -40,7 +40,7 @@ from .const import (
     DEFAULT_STARTS_WEIGHT,
     DOMAIN,
 )
-from .core.bt import round_target
+from .core.bt import MAX_TARGET, round_target
 from .core.explain import PlanSnapshot, plan_change, snapshot_from
 from .core.model import Prediction
 from .core.planner import charge_cost
@@ -231,6 +231,7 @@ class ViewBuilder:
             zone_floor,
             zone_high,
             zone_quiet,
+            zone_quiet_valve_open,
             zone_window_open,
         )
 
@@ -364,8 +365,12 @@ class ViewBuilder:
             bt_on = bt_off = bt_past = []
             bt_eid = z.cfg.get(CONF_BT_ENTITY) if z.cfg.get(CONF_BT_CONTROL) else None
             if bt_eid:
-                bt_on = [round_target(cap) if (cap := zone_charge_cap(z, h)) is not None else None for h in hours]
                 bt_off = [round_target(zone_base(z, h) if q else f) for h, q, f in zip(hours, quiet, floor)]
+                # quiet time with the valve open: the thermostat stays at its maximum, block or not
+                bt_off = [MAX_TARGET if q and zone_quiet_valve_open(z, h) else b for h, q, b in zip(hours, quiet, bt_off)]
+                bt_on = [
+                    round_target(cap) if (cap := zone_charge_cap(z, h)) is not None else b for h, b in zip(hours, bt_off)
+                ]
                 if zone_window_open(hass, z):  # same as the actuator: the base while airing (from now on)
                     base = [round_target(zone_base(z, h)) for h in hours]
                     bt_on = bt_on[: window.now_index] + base[window.now_index :]

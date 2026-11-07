@@ -78,7 +78,8 @@
             "bt_entity": "Better-Thermostat-Entität",
             "quiet_from": "Ruhezeit von",
             "quiet_to": "Ruhezeit bis",
-            "quiet_schedule": "Ruhezeit-Zeitplan (optional)"
+            "quiet_schedule": "Ruhezeit-Zeitplan (optional)",
+            "quiet_open": "Ventil in der Ruhezeit offen bei Bedarf"
           },
           "data_description": {
             "surfaces": "YAML-Liste, z. B. [{kind: window, azimuth: 90, tilt: 90}, {kind: roof, azimuth: 180, tilt: 40}]. Azimut: 0=N, 90=O, 180=S, 270=W.",
@@ -92,7 +93,8 @@
             "bt_control": "Thermocast setzt den Sollwert des Better Thermostats dieses Raums: im Block die Obergrenze, sonst die Untergrenze. Better-Thermostat-Zeitpläne/Automationen für diesen Raum deaktivieren.",
             "bt_entity": "Die climate-Entität von Better Thermostat (nicht der TRV selbst).",
             "quiet_from": "15 min vor der Ruhezeit wird das Thermostat ausgeschaltet und danach nicht angefasst (Better Thermostat sendet weiter die Raumtemperatur, ein regelndes Ventil antwortet mit Stellgeräuschen). Am Ende wieder an, oder auf den Grundwert, wenn der Raum 1 K darunter fällt.",
-            "quiet_schedule": "Ein Zeitplan-Helfer für weitere Ruhefenster, z. B. Mittagsschlaf 12:30–14:30 und Nacht 19–07, auch je Wochentag. Ruhe, wenn dieser Zeitplan ODER das Von/Bis-Fenster aktiv ist."
+            "quiet_schedule": "Ein Zeitplan-Helfer für weitere Ruhefenster, z. B. Mittagsschlaf 12:30–14:30 und Nacht 19–07, auch je Wochentag. Ruhe, wenn dieser Zeitplan ODER das Von/Bis-Fenster aktiv ist.",
+            "quiet_open": "Einmal vor jeder Ruhezeit entschieden: fiele der Raum darin unter seine Untergrenze, geht das Thermostat auf Maximum und das Ventil bleibt die ganze Ruhezeit offen (Wärme nur bei Kesselfreigabe, keine Motorbewegung); sonst wie gewohnt aus. In der Ruhezeit wird nichts geschrieben."
           }
         },
         "reconfigure": {
@@ -118,7 +120,8 @@
             "bt_entity": "Better-Thermostat-Entität",
             "quiet_from": "Ruhezeit von",
             "quiet_to": "Ruhezeit bis",
-            "quiet_schedule": "Ruhezeit-Zeitplan (optional)"
+            "quiet_schedule": "Ruhezeit-Zeitplan (optional)",
+            "quiet_open": "Ventil in der Ruhezeit offen bei Bedarf"
           },
           "data_description": {
             "surfaces": "YAML-Liste, z. B. [{kind: window, azimuth: 90, tilt: 90}, {kind: roof, azimuth: 180, tilt: 40}]. Azimut: 0=N, 90=O, 180=S, 270=W.",
@@ -132,7 +135,8 @@
             "bt_control": "Thermocast setzt den Sollwert des Better Thermostats dieses Raums: im Block die Obergrenze, sonst die Untergrenze. Better-Thermostat-Zeitpläne/Automationen für diesen Raum deaktivieren.",
             "bt_entity": "Die climate-Entität von Better Thermostat (nicht der TRV selbst).",
             "quiet_from": "15 min vor der Ruhezeit wird das Thermostat ausgeschaltet und danach nicht angefasst (Better Thermostat sendet weiter die Raumtemperatur, ein regelndes Ventil antwortet mit Stellgeräuschen). Am Ende wieder an, oder auf den Grundwert, wenn der Raum 1 K darunter fällt.",
-            "quiet_schedule": "Ein Zeitplan-Helfer für weitere Ruhefenster, z. B. Mittagsschlaf 12:30–14:30 und Nacht 19–07, auch je Wochentag. Ruhe, wenn dieser Zeitplan ODER das Von/Bis-Fenster aktiv ist."
+            "quiet_schedule": "Ein Zeitplan-Helfer für weitere Ruhefenster, z. B. Mittagsschlaf 12:30–14:30 und Nacht 19–07, auch je Wochentag. Ruhe, wenn dieser Zeitplan ODER das Von/Bis-Fenster aktiv ist.",
+            "quiet_open": "Einmal vor jeder Ruhezeit entschieden: fiele der Raum darin unter seine Untergrenze, geht das Thermostat auf Maximum und das Ventil bleibt die ganze Ruhezeit offen (Wärme nur bei Kesselfreigabe, keine Motorbewegung); sonst wie gewohnt aus. In der Ruhezeit wird nichts geschrieben."
           }
         }
       },

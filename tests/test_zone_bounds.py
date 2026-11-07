@@ -148,6 +148,31 @@ async def test_block_charges_only_zones_that_would_fall_below(hass: HomeAssistan
     assert zone_charge_target(z, t0 + timedelta(days=1)) == 22.5  # hours nobody planned: as before
 
 
+async def test_quiet_open_uncaps_a_quiet_time_with_need(hass: HomeAssistant) -> None:
+    """Valve open in quiet time: a quiet time in which the zone would fall below its lower bound is uncapped as a whole
+    (the valve stays open), one without need is shut (base); the actuator's decision wins for the running one."""
+    from custom_components.thermocast.const import CONF_QUIET_OPEN
+    from custom_components.thermocast.coordinator import build_plan_inputs
+    from custom_components.thermocast.core.forecast import Forecast
+
+    z = _z(**{CONF_QUIET_FROM: "19:00:00", CONF_QUIET_TO: "07:00:00", CONF_BT_CONTROL: True, CONF_QUIET_OPEN: True,
+              CONF_BT_ENTITY: "climate.bt", CONF_COMFORT_HIGH: 21.0, CONF_BASE_TEMP: 17.0})
+    t0 = _local(hass, 18)  # quiet from the second hour on, comfort (20.2) until 22:00
+    fc = Forecast(times=[t0 + timedelta(hours=h) for h in range(8)], t_out=[5.0] * 8, irr={}, fetched_at=t0)
+    for e in ("sensor.living", "sensor.kitchen"):
+        hass.states.async_set(e, "20.0")
+    cold = build_plan_inputs(hass, {"z": z}, fc, 0, 6, z_sigma=0.0)[0]
+    assert cold.charge_cap[0] == 21.0 and cold.charge_cap[1:] == [None] * 5
+    z.quiet_decided = False  # the actuator shut it before the quiet time
+    shut = build_plan_inputs(hass, {"z": z}, fc, 0, 6, z_sigma=0.0)[0]
+    assert shut.charge_cap[1:] == [17.0] * 5
+    z.quiet_decided = None
+    for e in ("sensor.living", "sensor.kitchen"):
+        hass.states.async_set(e, "23.0")  # never below: shut as before
+    warm = build_plan_inputs(hass, {"z": z}, fc, 0, 6, z_sigma=0.0)[0]
+    assert warm.charge_cap[1:] == [17.0] * 5
+
+
 async def test_tail_trim_reads_the_burner_starts_counter(hass: HomeAssistant) -> None:
     from types import SimpleNamespace
 

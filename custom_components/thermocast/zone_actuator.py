@@ -15,8 +15,8 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
-from .const import CONF_BT_CONTROL, CONF_BT_ENTITY, QUIET_LEAD
-from .core.bt import STEP, BtInput, bt_decide
+from .const import CONF_BT_CONTROL, CONF_BT_ENTITY, CONF_QUIET_OPEN, QUIET_LEAD
+from .core.bt import COLD_MARGIN, STEP, BtInput, bt_decide
 
 if TYPE_CHECKING:
     from .coordinator import ZoneRuntime
@@ -33,11 +33,13 @@ class BtZoneState:
     day: date | None = None
     override_until: datetime | None = None
     off: bool = False  # switched off by Thermocast (quiet time)
+    quiet_open: bool | None = None  # "valve open" zones: this quiet time's decision (None: not decided yet)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "last_written": self.last_written,
             "off": self.off,
+            "quiet_open": self.quiet_open,
             "writes_today": self.writes_today,
             "day": self.day.isoformat() if self.day else None,
             "override_until": self.override_until.isoformat() if self.override_until else None,
@@ -52,6 +54,7 @@ class BtZoneState:
             day=date.fromisoformat(day) if day else None,
             override_until=datetime.fromisoformat(until) if until else None,
             off=bool(data.get("off", False)),
+            quiet_open=data.get("quiet_open"),
         )
 
 
@@ -124,13 +127,24 @@ class ZoneActuator:
                     continue
                 s.override_until, s.last_written, s.off = None, None, False  # override over: take the room back
             quiet_now = zone_quiet(z, now)
+            quiet_soon = not quiet_now and zone_quiet(z, now, QUIET_LEAD)
+            temp = temps.get(zid)
+            if not (quiet_now or quiet_soon) or not z.cfg.get(CONF_QUIET_OPEN):
+                s.quiet_open = None
+            elif s.quiet_open is None:
+                # one decision per quiet time, kept to its end: open if the zone would fall below its lower bound in it
+                first = dt_util.as_utc(now if quiet_now else now + QUIET_LEAD).replace(minute=0, second=0, microsecond=0)
+                s.quiet_open = z.quiet_open.get(first, True)
+            if s.quiet_open is False and temp is not None and temp < zone_base(z, now) - COLD_MARGIN:
+                s.quiet_open = True  # colder than forecast: open once and stay open
+            z.quiet_decided = s.quiet_open
             inp = BtInput(
                 block_on=block_on, failsafe=failsafe, floor_now=zone_floor(z, now), high=zone_charge_target(z, now),
-                base=zone_base(z, now), quiet_now=quiet_now, quiet_soon=not quiet_now and zone_quiet(z, now, QUIET_LEAD),
-                temp=temps.get(zid), window_open=zone_window_open(self.hass, z),
+                base=zone_base(z, now), quiet_now=quiet_now, quiet_soon=quiet_soon,
+                temp=temp, window_open=zone_window_open(self.hass, z),
                 # observe mode compares with what the thermostat has – nothing of ours was written
                 last_written=s.last_written if enabled else current, writes_today=s.writes_today,
-                last_off=s.off if enabled else current is None, hand_back=hand_back,
+                last_off=s.off if enabled else current is None, hand_back=hand_back, quiet_open=s.quiet_open,
             )
             target, reason = bt_decide(inp)
             if (target is not None or reason == "off") and not enabled:

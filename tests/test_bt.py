@@ -65,6 +65,25 @@ def test_off_thermostat_comes_back_without_temperature_and_on_hand_back():
     assert bt_decide(replace(BASE, last_off=True)) == (20.0, "write")  # quiet time over: on at the floor
 
 
+def test_quiet_open_saturates_once_then_silence():
+    """Valve open in quiet time: the maximum once, then nothing – block or not, cold or unknown temperature."""
+    q = replace(BASE, quiet_open=True)
+    assert bt_decide(replace(q, quiet_soon=True, last_written=20.0)) == (24.0, "open")
+    for inp in (replace(q, quiet_now=True, last_written=24.0, block_on=True), replace(q, quiet_now=True,
+                last_written=24.0, temp=None), replace(q, quiet_now=True, last_written=24.0, temp=15.0)):
+        assert bt_decide(inp) == (None, "quiet_open")
+    assert bt_decide(replace(q, quiet_now=True, last_off=True)) == (24.0, "open")  # opened from off (cold room)
+    assert bt_decide(replace(q, quiet_now=True, last_written=24.0, hand_back=True)) == (17.0, "write")
+
+
+def test_quiet_shut_has_no_cold_exception_of_its_own():
+    """Shut: off and silent, also below base − 1 K (the caller opens a cold room instead)."""
+    q = replace(BASE, quiet_open=False)
+    assert bt_decide(replace(q, quiet_soon=True, last_written=20.0)) == (None, "off")
+    assert bt_decide(replace(q, quiet_now=True, last_off=True, temp=15.0)) == (None, "quiet")
+    assert bt_decide(replace(q, quiet_now=True, last_off=True, temp=None)) == (None, "quiet")
+
+
 def test_daily_budget_and_unknown_temperature():
     assert bt_decide(replace(BASE, writes_today=MAX_WRITES_PER_DAY)) == (None, "budget")
     assert bt_decide(replace(BASE, temp=None)) == (None, "no_temperature")
