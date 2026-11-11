@@ -204,6 +204,13 @@ für die Wärmepumpe später COP(T_out, Vorlauf), Strompreis, PV-Überschuss.
   `max(gemessen, Temperatur vor dem Öffnen)` (`window_recovery_temp`, Ereignis `window_recovery`), Stunden mit
   Lüften oder Nachlauf werden nicht gelernt (Warmstart: Stunde davor/danach auch nicht). Anlass: 10 min Stoßlüften
   −1 K, nach 40 min wieder +0,5 K – ohne Nachlauf plante die Zone sofort einen Block.
+- **Eingefrorener Fühler** (`silent_drift` in `core/rules.py`): je abgeschlossener Stunde summiert die Zone die vom
+  Modell erwartete Änderung, solange keiner ihrer Fühler meldet (`last_reported`, auch gleicher Wert zählt); ab
+  |Σ| ≥ `STALE_DRIFT_K` 0,6 K gilt der Fühler als eingefroren (Ereignis `sensor_stale`): nicht gelernt, führt nicht;
+  alle führenden Zonen eingefroren → Fail-safe `stale_temperature`. Nächste Meldung beendet es (`sensor_back`).
+  Erst ab 72 gelernten Stunden (Prior kann's nicht beurteilen); nicht gespeichert (Neustart = frisch).
+  Anlass: Zigbee-Fühler eines Heizkörperraums 12 h auf 19,8 eingefroren → Block bis 01:06, Nachbarraum 21,8 °C;
+  nachgespielt (14 Tage Log): erkannt nach 3 h, sonst nur echte Funk-Aussetzer eines anderen Fühlers, keine Fehlalarme.
 - **Warmstart-Halten:** Zone mit Modell auf dem Prior (neu/zurückgesetzt) → bis der Warmstart nach dem Setup fertig
   ist (≤ 10 min), hält der Aktor den gespeicherten Zustand (Override `warmstart`). Anlass: Flächen geändert →
   Reset → Prior-Plan schaltete den Kessel ein, 3 s bevor der Warmstart fertig war (dann 1 h Mindestblock).
@@ -223,6 +230,10 @@ für die Wärmepumpe später COP(T_out, Vorlauf), Strompreis, PV-Überschuss.
   Ruhezeit ungedeckelt (`charge_cap` None), laufende Ruhezeit nimmt die Aktor-Entscheidung (`z.quiet_decided`).
   Testnacht 06./07.11. (von Hand, 24 °C): keine Motorbewegung, Raum 20,0–20,6 statt 19,1–19,7, Preis 3 Nachtblöcke/4 Starts/
   ~23 kWh – die FBH-Zonen heizen mit.
+  **Ventilöffnung in der Ruhezeit** (Zonen-Optionen `quiet_valve_entity` = TRV-Grenze `number.…_valve_opening_degree`,
+  `quiet_valve_opening` %, Slider): 15 min vorher auf den Wert, in der Ruhezeit nicht verstellt (auch nicht nach
+  Handänderung), danach 100 % (`BtZoneState.valve_limited`, Ereignis `valve_limit`); Rückgabe (Steuerung aus/Fail-safe)
+  → 100 %. Nur mit BT-Steuerung und nicht im Beobachtungsmodus. Planer kennt die Grenze nicht (rechnet volle Wärme).
 
 ### Entitäten
 
@@ -235,7 +246,7 @@ Attr. Parameter + Sonnenantwort je Fläche).
 
 ---
 
-## 4. Status (v0.10.0)
+## 4. Status (v0.10.1)
 
 - ✅ Kern getestet auf synthetischen Daten: 1-Schritt-MAE ≈ 0,03 K/h, 24-h-Prognose-MAE ≈ 0,1 K,
   Ostfenster und Süddach werden getrennt gelernt, Planer heizt bei −5 °C, nicht bei 18 °C.
@@ -351,6 +362,8 @@ Attr. Parameter + Sonnenantwort je Fläche).
   `heating_batch` taugt dafür nicht als Maßstab: nach dem Überschießen bleibt dort das Ventil zu (s. v0.9.3).
   v0.10.0: Zonen-Option „Ventil in der Ruhezeit offen bei Bedarf“ (`quiet_open`, s. BT-Aktor): eine Entscheidung je
   Ruhezeit, offen = BT 24 und im Planer ungedeckelt, nachts keine Motorbewegung; Panel zeigt 24 und „Ventil offen“.
+  v0.10.1: eingefrorener Fühler (nicht lernen, nicht führen, alle führenden → Fail-safe); Ventilöffnung in der Ruhezeit
+  (TRV-Grenze vorher auf X %, danach 100 %).
 - Bekannte Schwächen:
   - Prognose nutzt aktuelle Nachbartemperaturen als konstant über den Horizont (Gewinne: Tagesprofil, s. o.).
   - Ein Gerät, das kühlt (z. B. Klimagerät im Sommer), meldet als Leistungssensor positive Watt – Gewinne sind ≥ 0;

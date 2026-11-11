@@ -117,6 +117,9 @@ Untergrenze), mit **Ruhezeiten** (fest und/oder `schedule`-Helfer) ohne Stellger
   Zonen-Option **Ventil in der Ruhezeit offen bei Bedarf**: einmal vor jeder Ruhezeit entschieden – fiele der Raum darin
   unter seine Untergrenze, geht das Thermostat stattdessen auf Maximum und das Ventil bleibt bis zum Ende ganz offen
   (Wärme, sobald ein Block läuft, keine Motorbewegung; der Planer sieht den Raum ungedeckelt). Dazwischen wird nichts geschrieben.
+  Optional mit **Ventilöffnung in der Ruhezeit**: die Öffnungsgrenze des TRV selbst (z. B. `number.…_valve_opening_degree`)
+  und einen Wert wählen – 15 min vor der Ruhezeit geht sie auf diesen Wert, in der Ruhezeit wird sie nicht verstellt,
+  danach wieder 100 % (die ganze Nacht eine kleinere, feste Öffnung).
 - **Wer zahlt für die Nacht:** Ein Raum in der Ruhezeit lässt sich nicht heizen – fällt er nachts unter seine
   Untergrenze, geht das auf den letzten Block vor der Ruhezeit, der den Raum dafür auflädt. Unterschreitungen, die
   kein Block verhindern kann (der Raum ist bis dahin zu), ziehen keinen Block nach vorn.
@@ -248,6 +251,8 @@ series:
 * Einschalten der Heizung ist immer erlaubt; Ausschalten nur nach Mindestblock und im Tagesbudget.
   Will der Planer den nächsten Block vor Ende der Mindestpause, bleibt die Heizung an (keine 2-h-Sperre).
 * Fehler im Update, Prognose älter als 2 h, fehlender Sensor einer führenden Zone → Freigabe **an**.
+  Ein Temperaturfühler, der schweigt, obwohl sich der Raum laut Modell um ≥ 0,6 K hätte ändern müssen, gilt als
+  **eingefroren**: seine Stunden werden nicht gelernt, die Zone führt nicht; alle führenden Zonen eingefroren → Freigabe **an**.
   Dauert ein Fail-safe länger als 1 h, erscheint ein Reparaturhinweis.
 * Entladen/Entfernen der Integration oder Ausschalten der Steuerung → Freigabe **an**
   (ein Neuladen nach einer Konfigurationsänderung nicht). Nach einem HA-Start warten fehlende Sensoren/Prognose

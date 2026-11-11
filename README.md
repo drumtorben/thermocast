@@ -125,6 +125,9 @@ manual changes.
   Zone option **valve open in quiet time when needed**: decided once before each quiet time – if the room would drop
   below its lower bound in it, the thermostat goes to its maximum instead and the valve stays fully open until the end
   (heat whenever a block runs, no motor moves; the planner sees the room as uncapped). Nothing is written in between.
+  Optionally with a **valve opening in quiet time**: pick the TRV's own opening limit (e.g.
+  `number.…_valve_opening_degree`) and a value – 15 min before the quiet time it goes to that value, it is left alone
+  during the quiet time and goes back to 100 % afterwards (a smaller, constant opening all night).
 - **Who pays for the night:** a room in quiet time can't be heated, so a drop below its lower bound at night is
   charged to the last block before the quiet time – that block charges the room up. Drops that no block could
   prevent (the room is closed until then) don't pull a block forward.
@@ -212,6 +215,8 @@ changes the release. Panel texts: English and German.
 * Turning heating on is always allowed; turning it off only after the minimum block and within the daily budget.
   If the planner wants the next block before the minimum pause would end, the heating stays on (no 2 h lock-out).
 * Update error, forecast older than 2 h, missing sensor of a leading zone → release **on**.
+  A temperature sensor that stays silent while the model expects the room to change by ≥ 0.6 K counts as **frozen**:
+  its hours are not learned and the zone doesn't lead; if all leading zones are frozen → release **on**.
   A fail-safe lasting more than 1 h raises a repair issue.
 * Unloading/removing the integration or switching control off → release **on** (a reload after a config change
   doesn't). After an HA start, missing sensors/forecast wait up to 5 min before the fail-safe (MQTT/Zigbee are often late).
