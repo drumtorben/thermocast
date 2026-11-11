@@ -76,6 +76,9 @@ CONF_QUIET_FROM = "quiet_from"  # no thermostat writes (valve noise) from …
 CONF_QUIET_TO = "quiet_to"  # … until
 CONF_QUIET_SCHEDULE = "quiet_schedule"  # optional schedule.* entity: more quiet windows (nap + night, weekdays)
 CONF_QUIET_OPEN = "quiet_open"  # quiet time with need: the valve stays fully open instead of shut (no motor moves)
+CONF_QUIET_VALVE_ENTITY = "quiet_valve_entity"  # the TRV's opening limit (number, e.g. valve_opening_degree) …
+CONF_QUIET_VALVE_OPENING = "quiet_valve_opening"  # … set to this % for the quiet time, back to 100 % after it
+VALVE_FULL = 100.0
 DEFAULT_HIGH_OFFSET = 1.0  # K above comfort
 DEFAULT_BASE_OFFSET = 2.0  # K below comfort
 QUIET_LEAD = timedelta(minutes=15)  # set the floor this long before the quiet time starts

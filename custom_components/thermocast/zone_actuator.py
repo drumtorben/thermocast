@@ -15,7 +15,15 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
-from .const import CONF_BT_CONTROL, CONF_BT_ENTITY, CONF_QUIET_OPEN, QUIET_LEAD
+from .const import (
+    CONF_BT_CONTROL,
+    CONF_BT_ENTITY,
+    CONF_QUIET_OPEN,
+    CONF_QUIET_VALVE_ENTITY,
+    CONF_QUIET_VALVE_OPENING,
+    QUIET_LEAD,
+    VALVE_FULL,
+)
 from .core.bt import COLD_MARGIN, STEP, BtInput, bt_decide
 
 if TYPE_CHECKING:
@@ -34,12 +42,14 @@ class BtZoneState:
     override_until: datetime | None = None
     off: bool = False  # switched off by Thermocast (quiet time)
     quiet_open: bool | None = None  # "valve open" zones: this quiet time's decision (None: not decided yet)
+    valve_limited: bool = False  # the TRV's opening limit is down for the quiet time
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "last_written": self.last_written,
             "off": self.off,
             "quiet_open": self.quiet_open,
+            "valve_limited": self.valve_limited,
             "writes_today": self.writes_today,
             "day": self.day.isoformat() if self.day else None,
             "override_until": self.override_until.isoformat() if self.override_until else None,
@@ -55,6 +65,7 @@ class BtZoneState:
             override_until=datetime.fromisoformat(until) if until else None,
             off=bool(data.get("off", False)),
             quiet_open=data.get("quiet_open"),
+            valve_limited=bool(data.get("valve_limited", False)),
         )
 
 
@@ -115,6 +126,9 @@ class ZoneActuator:
             s = self.state.setdefault(zid, BtZoneState())
             if s.day != today:
                 s.day, s.writes_today = today, 0
+            if enabled:  # independent of the thermostat's state and of a manual override
+                quiet = not hand_back and (zone_quiet(z, now) or zone_quiet(z, now, QUIET_LEAD))
+                await self._limit_valve(zid, z, s, quiet, now)
             current = _current_target(self.hass, eid)
             if current == "unavailable":
                 out[zid] = {"target": None, "reason": "unavailable", "override_until": None}
@@ -193,6 +207,28 @@ class ZoneActuator:
         s.last_written = target
         s.writes_today += 1
         self.events.add(now, "bt_written", zone=zid, detail=f"{target:.1f}")
+
+    async def _limit_valve(self, zid: str, z: ZoneRuntime, s: BtZoneState, quiet: bool, now: datetime) -> None:
+        """The TRV's opening limit (opt-in): down to the configured opening 15 min before the quiet time, back to
+        100 % when it is over (or Thermocast hands the room back) – nothing in between, every change moves the motor.
+        A missed lead (HA down) lowers it once in the quiet time; a change by hand in it is left alone."""
+        eid, opening = z.cfg.get(CONF_QUIET_VALVE_ENTITY), z.cfg.get(CONF_QUIET_VALVE_OPENING)
+        if not eid or opening is None or s.valve_limited == quiet:
+            return
+        st = self.hass.states.get(eid)
+        if st is None or st.state in ("unavailable", "unknown"):
+            return  # next update tries again
+        value = float(opening) if quiet else VALVE_FULL
+        try:
+            if abs(float(st.state) - value) >= 0.5:
+                await self.hass.services.async_call(
+                    eid.split(".")[0], "set_value", {"entity_id": eid, "value": value}, blocking=True
+                )
+                self.events.add(now, "valve_limit", zone=zid, detail=f"{value:.0f} %")
+        except Exception as err:  # noqa: BLE001 - a broken thermostat must not stop the release logic
+            _LOGGER.warning("Thermocast: setting %s to %.0f %% failed: %s", eid, value, err)
+            return
+        s.valve_limited = quiet
 
     async def _switch_off(self, zid: str, eid: str, now: datetime) -> None:
         s = self.state[zid]

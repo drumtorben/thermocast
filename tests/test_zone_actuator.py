@@ -301,3 +301,61 @@ async def test_quiet_open_decides_once_and_stays_silent(hass: HomeAssistant) -> 
     hass.states.async_set(BT, "heat", {"temperature": 24.0})
     assert await run(at(14, 3), 17.5) == "quiet_open" and len(temps) == n + 1
     assert "bt_override" not in [e["type"] for e in act.events.to_list()]
+
+
+async def test_valve_limit_goes_down_before_quiet_time_and_back_after(hass: HomeAssistant) -> None:
+    """The TRV's opening limit: down 15 min before the quiet time, untouched in it (also after a change by hand),
+    100 % once it is over; observe mode and a missing entity write nothing, handing back restores 100 %."""
+    from datetime import datetime
+
+    from homeassistant.util import dt as dt_util
+
+    from custom_components.thermocast.const import (
+        CONF_QUIET_FROM,
+        CONF_QUIET_TO,
+        CONF_QUIET_VALVE_ENTITY,
+        CONF_QUIET_VALVE_OPENING,
+    )
+    from custom_components.thermocast.coordinator import ZoneRuntime
+    from custom_components.thermocast.core.model import OnlineZoneModel, ZoneSpec
+    from custom_components.thermocast.events import EventLog
+    from custom_components.thermocast.zone_actuator import ZoneActuator
+
+    from .conftest import ZONE_DATA
+
+    valve = "number.trv_kid_valve_opening_degree"
+    data = {**ZONE_DATA, CONF_BT_CONTROL: True, CONF_BT_ENTITY: BT, CONF_BASE_TEMP: 17.0,
+            CONF_QUIET_FROM: "19:00:00", CONF_QUIET_TO: "07:00:00",
+            CONF_QUIET_VALVE_ENTITY: valve, CONF_QUIET_VALVE_OPENING: 25}
+    z = ZoneRuntime("kid", "Kind", data, OnlineZoneModel(ZoneSpec()))
+    hass.states.async_set(BT, "heat", {"temperature": 20.0})
+    hass.states.async_set(valve, "100")
+    async_mock_service(hass, "climate", "set_temperature")
+    async_mock_service(hass, "climate", "set_hvac_mode")
+    sets = async_mock_service(hass, "number", "set_value")
+    act = ZoneActuator(hass, EventLog())
+    tz = dt_util.get_time_zone(hass.config.time_zone)
+
+    def at(day: int, hour: int, minute: int = 0) -> datetime:
+        return datetime(2026, 10, day, hour, minute, tzinfo=tz)
+
+    async def run(now: datetime, enabled: bool = True, hand_back: bool = False) -> list[float]:
+        await act.async_apply({"kid": z}, {"kid": 20.3}, now=now, block_on=False, failsafe=hand_back,
+                              enabled=enabled, hand_back=hand_back)
+        return [c.data["value"] for c in sets]
+
+    assert await run(at(12, 18, 30)) == []  # not yet
+    assert await run(at(12, 18, 50), enabled=False) == []  # observe mode
+    assert await run(at(12, 18, 50)) == [25.0] and sets[-1].data["entity_id"] == valve
+    hass.states.async_set(valve, "40")  # by hand in the night: left alone
+    for when in (at(12, 19), at(12, 23), at(13, 6, 50)):
+        assert await run(when) == [25.0]
+    assert await run(at(13, 7)) == [25.0, 100.0]  # morning: full again
+    hass.states.async_set(valve, "100")
+    assert await run(at(13, 12)) == [25.0, 100.0]
+    assert [e["detail"] for e in act.events.to_list() if e["type"] == "valve_limit"] == ["25 %", "100 %"]
+
+    assert await run(at(13, 18, 50)) == [25.0, 100.0, 25.0]
+    hass.states.async_set(valve, "25")
+    assert await run(at(13, 22), hand_back=True) == [25.0, 100.0, 25.0, 100.0]  # control off: valve back to full
+    assert act.to_dict()["kid"]["valve_limited"] is False

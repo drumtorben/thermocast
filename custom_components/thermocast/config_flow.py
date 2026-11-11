@@ -49,6 +49,8 @@ from .const import (
     CONF_QUIET_OPEN,
     CONF_QUIET_SCHEDULE,
     CONF_QUIET_TO,
+    CONF_QUIET_VALVE_ENTITY,
+    CONF_QUIET_VALVE_OPENING,
     CONF_RELEASE_ENTITY,
     CONF_RELEASE_OFF,
     CONF_RELEASE_ON,
@@ -176,6 +178,14 @@ def _zone_schema() -> vol.Schema:
             vol.Optional(CONF_QUIET_TO): selector.TimeSelector(),
             vol.Optional(CONF_QUIET_SCHEDULE): selector.EntitySelector(selector.EntitySelectorConfig(domain="schedule")),
             vol.Optional(CONF_QUIET_OPEN, default=False): selector.BooleanSelector(),
+            vol.Optional(CONF_QUIET_VALVE_ENTITY): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain=["number", "input_number"])
+            ),
+            vol.Optional(CONF_QUIET_VALVE_OPENING, default=100): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0, max=100, step=5, unit_of_measurement="%", mode=selector.NumberSelectorMode.SLIDER
+                )
+            ),
             vol.Optional(CONF_SURFACES, default=[]): selector.ObjectSelector(),
             vol.Optional(CONF_NEIGHBOR_SENSORS, default=[]): _temp_sensor(multiple=True),
             vol.Optional(CONF_GAIN_ENTITIES, default=[]): selector.EntitySelector(
