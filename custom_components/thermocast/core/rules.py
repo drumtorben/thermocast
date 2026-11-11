@@ -80,6 +80,22 @@ def window_recovery_temp(
     return max(temp, before)
 
 
+STALE_DRIFT_K = 0.6  # a sensor reporting on change (0.1–0.5 K steps) has surely reported after this much change
+
+
+def silent_drift(drift: float, expected: float, hour: datetime, last_report: datetime | None) -> float:
+    """Change the model expects since the zone's sensor last reported, after closing ``hour`` (its start) with
+    the expected change ``expected`` (K) for that hour. A sensor that reports on change and stays silent while
+    this grows past ``STALE_DRIFT_K`` is frozen (real case: a Zigbee sensor stuck at 19.8 °C for 12 h while the
+    planner kept heating for it). Only the part of the hour after the last report counts."""
+    end = hour + timedelta(hours=1)
+    if last_report is None or last_report >= end:
+        return 0.0
+    if last_report <= hour:
+        return drift + expected
+    return expected * ((end - last_report) / timedelta(hours=1))
+
+
 def release_state(value: str | None, domain: str, on_value: str | None, off_value: str | None) -> bool | None:
     """Interpret a state of the release entity: True = heating allowed, None = unknown."""
     if value is None or value in ("unknown", "unavailable"):

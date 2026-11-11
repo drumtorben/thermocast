@@ -84,10 +84,12 @@ from .core.planner import PlanResult, ZonePlanInput, charge_cost, plan, violatio
 from .core.quality import ForecastLog, RingLog, calibration, measured_by_hour, param_snapshot, std_scale_profile
 from .core.rollout import block_lengths_for
 from .core.rules import (
+    STALE_DRIFT_K,
     binary_value,
     hvac_heating,
     next_on_hours,
     release_value,
+    silent_drift,
     trim_tail_restart,
     window_recovering,
     window_recovery_temp,
@@ -106,6 +108,7 @@ ISSUE_FAILSAFE = "failsafe"
 FAILSAFE_ISSUE_AFTER = timedelta(hours=1)
 STARTUP_GRACE = timedelta(minutes=5)  # after a start: missing sensors/forecast hold the state for this long
 STARTUP_RECHECK = timedelta(minutes=1)  # … and are checked again every minute
+STALE_MIN_UPDATES = 72  # learned hours before the model's expected change may call a silent sensor frozen
 STARTUP_HOLD_REASONS = ("no_temperature", "no_forecast", "forecast_gap", "no_zones")
 WARMSTART_HOLD_MAX = timedelta(minutes=10)  # a zone model on its prior holds the release until the warm start
 RELOADING = "reloading"  # set by the update listener: the next unload is a self-reload, not a removal
@@ -199,6 +202,9 @@ class ZoneRuntime:
     # between the 15-min samples); the samples in ``acc`` remain the fallback for hours not covered
     q_tw: HourlyIntegral = field(default_factory=HourlyIntegral)
     pump_tw: HourlyIntegral = field(default_factory=HourlyIntegral)
+    # frozen sensor: change the model expects since the sensor last reported, and since when it counts as frozen
+    silent_drift: float = 0.0
+    stale_since: datetime | None = None
 
     def reset_acc(self) -> None:
         self.acc = {"t_out": [], "q": [], "neighbors": [], "gains": [], "window": [], "pump": []}
@@ -363,6 +369,23 @@ def zone_temp(hass: HomeAssistant, z: ZoneRuntime) -> float | None:
     return _mean([_num(hass, e) for e in z.cfg.get(CONF_TEMP_SENSORS, [])])
 
 
+def zone_last_report(hass: HomeAssistant, z: ZoneRuntime) -> datetime | None:
+    """Latest report of any of the zone's temperature sensors (a report with an unchanged value counts too)."""
+    times = [
+        st.last_reported for e in z.cfg.get(CONF_TEMP_SENSORS, [])
+        if (st := hass.states.get(e)) is not None and _num(hass, e) is not None
+    ]
+    return max(times) if times else None
+
+
+def expected_change(model: OnlineZoneModel, rec: HourRecord) -> float:
+    """Change of the zone the model expects over the hour ``rec`` (K, 0 if it cannot say)."""
+    if not math.isfinite(rec.t_out) or model.n_updates < STALE_MIN_UPDATES:  # an untrained model cannot judge
+        return 0.0
+    pred = model.predict(rec.temp, [rec], with_contrib=False).mean[0]
+    return pred - rec.temp if math.isfinite(pred) else 0.0
+
+
 def heating_inputs(
     hass: HomeAssistant, data: Mapping[str, Any], options: Mapping[str, Any]
 ) -> tuple[bool | None, float | None]:
@@ -458,7 +481,8 @@ def build_plan_inputs(
             name=sid, model=z.model, temp_now=temp, future=future,
             comfort_low=[zone_floor(z, t) for t in ends],
             comfort_high=[zone_high(z, t) for t in ends],
-            q_on=z.q_on, leads_release=bool(z.cfg.get(CONF_LEADS_RELEASE, True)) and not window,
+            # a frozen sensor neither calls for a block nor keeps one running (it would heat for a stuck value)
+            q_on=z.q_on, leads_release=bool(z.cfg.get(CONF_LEADS_RELEASE, True)) and not window and z.stale_since is None,
             std_scale=z.std_scale,
         )
         if z.cfg.get(CONF_BT_CONTROL):
@@ -935,6 +959,9 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
             temp = zone_temp(hass, z)
             if temp is None:
                 continue
+            if z.stale_since is not None and (rep := zone_last_report(hass, z)) is not None and rep > z.stale_since:
+                z.stale_since, z.silent_drift = None, 0.0  # the sensor reports again
+                self.events.add(now, "sensor_back", zone=z.subentry_id)
             # 1) close the previous hour -> one RLS step
             if z.pending_hour is not None and hour > z.pending_hour:
                 try:
@@ -1064,6 +1091,10 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
             gains=gains,
             valid=valid,
         )
+        if hour is not None:
+            self._track_stale(z, rec, hour, now)
+        if z.stale_since is not None:
+            rec.valid = False  # a stuck value: "heated for an hour, nothing happened" must not be learned
         err = z.model.update(rec, temp_now)
         pumps = acc.get("pump", [])
         pump_share = _mean(pumps) if pumps and all(p is not None for p in pumps) else None
@@ -1078,6 +1109,18 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
         if not z.params or z.params[-1]["date"] != today:
             z.params = [*z.params, {"date": today, **param_snapshot(z.model)}][-PARAM_HISTORY_DAYS:]
         self._recalibrate(z)
+
+    def _track_stale(self, z: ZoneRuntime, rec: HourRecord, hour: datetime, now: datetime) -> None:
+        """Sum the change the model expects while the zone's sensor stays silent; past ``STALE_DRIFT_K`` the
+        sensor counts as frozen until it reports again."""
+        z.silent_drift = silent_drift(z.silent_drift, expected_change(z.model, rec), hour, zone_last_report(self.hass, z))
+        if z.stale_since is None and abs(z.silent_drift) >= STALE_DRIFT_K:
+            z.stale_since = now
+            self.events.add(now, "sensor_stale", zone=z.subentry_id, detail=f"{z.silent_drift:+.1f} K")
+            _LOGGER.warning(
+                "Thermocast: temperature of zone %s unchanged although the model expects %+.1f K – treated as frozen",
+                z.title, z.silent_drift,
+            )
 
     async def _ensure_schedules(self, hour: datetime) -> None:
         """Read the weekly plans of the comfort and quiet schedules once per hour (they rarely change)."""
@@ -1155,6 +1198,9 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
         for sid, z in self.zones.items():
             if sid not in planned_ids and z.cfg.get(CONF_LEADS_RELEASE, True):
                 failsafe = f"no_temperature:{z.title}"
+        leading = [z for z in self.zones.values() if z.cfg.get(CONF_LEADS_RELEASE, True)]
+        if failsafe is None and leading and all(z.stale_since is not None for z in leading):
+            failsafe = "stale_temperature"  # no leading zone measures any more: heating allowed, as without sensors
         for zi in inputs:
             z = self.zones[zi.name]
             zones_out[zi.name] = ZoneResult(

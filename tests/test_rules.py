@@ -14,6 +14,7 @@ from core.rules import (
     hold_until,
     next_on_hours,
     release_state,
+    silent_drift,
     trim_tail_restart,
     window_recovering,
     window_recovery_temp,
@@ -103,3 +104,12 @@ def test_window_recovery_plans_from_the_temperature_before_airing():
     assert window_recovery_temp(20.9, None, closed, closed + timedelta(minutes=7)) == 20.9  # nothing known before
     assert window_recovery_temp(20.9, 21.9, None, closed) == 20.9  # never aired
     assert window_recovering(closed, closed) and not window_recovering(closed, closed - timedelta(minutes=1))
+
+
+def test_silent_drift_sums_the_expected_change_while_the_sensor_is_silent():
+    hour = datetime(2026, 11, 8, 20, tzinfo=UTC)
+    assert silent_drift(0.0, 0.35, hour, hour + timedelta(minutes=15)) == 0.35 * 0.75  # silent from 20:15
+    assert silent_drift(0.26, 0.35, hour + timedelta(hours=1), hour + timedelta(minutes=15)) == 0.26 + 0.35
+    assert math.isclose(silent_drift(0.6, -0.1, hour, hour - timedelta(hours=3)), 0.5)  # signed: cooling counts against
+    assert silent_drift(0.6, 0.35, hour, hour + timedelta(minutes=61)) == 0.0  # reported after the hour
+    assert silent_drift(0.6, 0.35, hour, None) == 0.0  # nothing known: not frozen
