@@ -11,6 +11,8 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    CONF_ANTI_CYCLE_MIN,
+    CONF_BURNER_STARTS,
     CONF_DHW_ENTITY,
     CONF_FLOW_TEMP_SENSOR,
     CONF_FORGETTING,
@@ -25,13 +27,15 @@ from .const import (
     CONF_TEMP_SENSORS,
     CONF_VALVE_ENTITY,
     CONF_WINDOW_ENTITIES,
+    DEFAULT_ANTI_CYCLE_MIN,
     DEFAULT_FORGETTING,
 )
+from .core.cycling import CycleRate, closed_share, cycle_sample
 from .core.forecast import fetch_forecast
 from .core.model import OnlineZoneModel, update_q_on
 from .core.quality import merge_logs
 from .core.rules import binary_value, hvac_heating, release_value
-from .core.series import hourly_fraction, hourly_mean, mask_off, without_idle_circulation
+from .core.series import hourly_fraction, hourly_increase, hourly_mean, mask_off, without_idle_circulation
 from .core.view import align
 from .core.warmstart import WarmstartInputs, build_records, warm_train
 from .core.weather import OutdoorBias
@@ -45,6 +49,7 @@ WARMSTART_DAYS = 30  # Open-Meteo serves up to 92 past days; the RLS forgets aft
 MIN_LEARNED_HOURS = 24
 HOUR = timedelta(hours=1)
 Q_ON_REPAIR_DAYS = 14  # the hour log
+CYCLE_MIN_SAMPLES = 12  # block hours before the learned rate replaces the prior
 
 
 def _heating_share(coordinator: ThermocastCoordinator, states, hours, end) -> list[float | None]:
@@ -213,3 +218,54 @@ async def async_warmstart(coordinator: ThermocastCoordinator, only_fresh: bool) 
         result[sid] = valid
         _LOGGER.info("Thermocast warm start: zone %s learned %s hours", z.title, valid)
     return result
+
+
+CYCLE_DAYS = 14  # the recorder keeps states ~10 days by default; the rate forgets after ~100 block hours anyway
+
+
+async def async_warm_cycle(coordinator: ThermocastCoordinator) -> int:
+    """Learn the burner starts per block hour from the recorder (starts counter, pump, valves). Returns the samples.
+
+    Needs the starts counter and the pump; without enough block hours the rate stays as it is.
+    """
+    from .coordinator import _cycle_valve_entity
+
+    hass = coordinator.hass
+    cfg, options = coordinator.config_entry.data, coordinator.config_entry.options
+    starts_eid = options.get(CONF_BURNER_STARTS)
+    if not starts_eid or not cfg.get(CONF_HEATING_ACTIVE) or "recorder" not in hass.config.components:
+        return 0
+    end = dt_util.utcnow().replace(minute=0, second=0, microsecond=0)
+    start = end - timedelta(days=CYCLE_DAYS)
+    hours = [start + i * HOUR for i in range(CYCLE_DAYS * 24)]
+    valves = {sid: e for sid, z in coordinator.zones.items() if (e := _cycle_valve_entity(z))}
+    dhw_eid = options.get(CONF_DHW_ENTITY)
+    ids = {cfg[CONF_HEATING_ACTIVE], cfg.get(CONF_RELEASE_ENTITY), cfg.get(CONF_FLOW_TEMP_SENSOR), dhw_eid, starts_eid}
+    ids |= {e for e in valves.values() if not e.startswith("climate.")}
+    states = await async_fetch_states(hass, {e for e in ids if e}, start, end)
+    if states is None:
+        return 0
+    thermostats = {e for e in valves.values() if e.startswith("climate.")}
+    actions = await async_fetch_attribute(hass, thermostats, "hvac_action", start, end) or {}
+
+    def valve(eid: str) -> list[float | None]:
+        if eid in thermostats:
+            return hourly_fraction(actions.get(eid, []), hours, end, hvac_heating)
+        return [None if v is None else v / 100.0 for v in hourly_mean(states.get(eid, []), hours, end)]
+
+    heat = _heating_share(coordinator, states, hours, end)
+    dhw = hourly_fraction(states.get(dhw_eid, []), hours, end, binary_value) if dhw_eid else [None] * len(hours)
+    starts = hourly_increase(states.get(starts_eid, []), hours, end)
+    shares = [valve(e) for e in valves.values()]
+    lock = float(options.get(CONF_ANTI_CYCLE_MIN, DEFAULT_ANTI_CYCLE_MIN))
+    rate, n = CycleRate(), 0
+    for i in range(1, len(hours)):
+        closed = closed_share([s[i] for s in shares])
+        sample = cycle_sample(heat[i], heat[i - 1], dhw[i] if dhw_eid else None, closed, starts[i])
+        if sample is not None:
+            rate.update(*sample, lock)
+            n += 1
+    if n >= CYCLE_MIN_SAMPLES:
+        coordinator.cycle = rate
+        _LOGGER.info("Thermocast warm start: burner starts per block hour learned from %s hours: %s", n, rate.rates(lock))
+    return n

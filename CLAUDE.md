@@ -173,9 +173,15 @@ Live und im Rollout: `charge_cost(w)` („Laden & Zehren“, Spec `docs/superpow
   in der Komfortzeit nur, wenn in ≥ 3 h noch/wieder Komfort ist (`CHARGE_MIN_COMFORT_H`, sonst lädt der Block kurz vor
   Komfortende für den leeren Abend; vor einem kurzen Fenster, z. B. 1 h zur Bettzeit, wird weiter vorgeladen), sonst
   Untergrenze (Komfort − Band bzw. Grundwert) – Anlass: ein Raum ohne Komfort am Wochenende wurde in den Blöcken anderer Zonen bis zur Obergrenze geladen.
-- **Wenig Abnehmer** (`cycling`): Blockstunden, in denen BT-Räume zu sind (Anteil an allen BT-Räumen), kosten
-  `(1+9w)·24/(Start+Länge+Zehrzeit)·60/45` je Stunde – mit wenigen offenen Kreisen taktet der Brenner im Block
-  (Taktsperre 45 min). Legt Blöcke in Stunden, in denen viele Räume Wärme nehmen (z. B. vor einer Ruhezeit).
+- **Wenig Abnehmer** (`cycling`): jede Blockstunde kostet `(1+9w)·24/(Start+Länge+Zehrzeit)·(r0 + r1·zu)` –
+  `zu` = Anteil der BT-Räume, die in der Stunde zu sind; mit wenigen offenen Kreisen taktet der Brenner im Block.
+  Legt Blöcke in Stunden, in denen viele Räume Wärme nehmen (z. B. vor einer Ruhezeit). `r0, r1` (v0.11.0,
+  `core/cycling.py`, `coordinator.cycle`): Startwert `0, 60/Taktsperre` (Option; aus = 45 min, vorher fest 60/45),
+  gelernt per RLS (Vergessen 0,99 je Stunde, Varianz ≤ Prior) aus Starts-Zähler-Zuwächsen in Blockstunden (Heizanteil
+  ≥ 75 %, nicht die erste Blockstunde – deren Start zählt extra –, ohne WW), `zu` aus Ventil-Entität bzw. BT-Thermostat
+  (`hvac_action`) zeitgewichtet; Warmstart aus 14 Tagen Recorder (≥ 12 Stunden), solange nichts gelernt ist bzw. per
+  Button. Referenzanlage 11.–25.11.: 46 Stunden → r0 ≈ 0,04, r1 ≈ 1,31 (≥ 2 von 4 Heizkörpern offen: 0,2 Starts/h,
+  Brenner 95 %; ≤ 2: 1,0/h, 73 %). Panel: Regel-Karte nennt die Rate.
 `default_cost` (alt, ohne Obergrenze/Zehrzeit) bleibt für Tests/Vergleich. Die Kostenfunktion ist injizierbar –
 für die Wärmepumpe später COP(T_out, Vorlauf), Strompreis, PV-Überschuss.
 
@@ -246,7 +252,7 @@ Attr. Parameter + Sonnenantwort je Fläche).
 
 ---
 
-## 4. Status (v0.10.4)
+## 4. Status (v0.11.0)
 
 - ✅ Kern getestet auf synthetischen Daten: 1-Schritt-MAE ≈ 0,03 K/h, 24-h-Prognose-MAE ≈ 0,1 K,
   Ostfenster und Süddach werden getrennt gelernt, Planer heizt bei −5 °C, nicht bei 18 °C.
@@ -369,6 +375,10 @@ Attr. Parameter + Sonnenantwort je Fläche).
   v0.10.4: Pumpenzeit gar nicht mehr angezeigt – Balkenhöhe, Tooltip und Heizstunden der Tageskarten = Brennerzeit
   (ohne Brenner-Entität Pumpenzeit); vergangene Blöcke bleiben Pumpe ≥ 50 %. Nur Anzeige; Modell/Planer
   bleiben beim Pumpen-Proxy (Vorlauf fällt in der Pause, das zeitgewichtete Q sinkt von selbst).
+  v0.11.0: Takten im Block gelernt (`r0 + r1·zu` Starts je Blockstunde, s. Planer „Wenig Abnehmer“) statt fest 60/45.
+  Anlass: Hysterese 10 K (FBH ≤ 45 °C gewünscht, Vorlauf lag bei 49–55) → ~26 Starts/Tag ab 22.11., Nachtblock
+  7,5 h mit 14 Starts. Befund: der Planer hatte das schon ~richtig eingepreist (gelernt 1,31 ≈ 1,33) – der Hebel ist das
+  Starts-Gewicht (seit 12.10. auf 0, am 25.11. auf 20 gestellt).
 - Bekannte Schwächen:
   - Prognose nutzt aktuelle Nachbartemperaturen als konstant über den Horizont (Gewinne: Tagesprofil, s. o.).
   - Ein Gerät, das kühlt (z. B. Klimagerät im Sommer), meldet als Leistungssensor positive Watt – Gewinne sind ≥ 0;

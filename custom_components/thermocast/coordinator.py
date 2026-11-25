@@ -29,6 +29,7 @@ from .const import (
     CONF_ANTI_CYCLE_MIN,
     CONF_BASE_TEMP,
     CONF_BT_CONTROL,
+    CONF_BT_ENTITY,
     CONF_BURNER_STARTS,
     CONF_CALIBRATE_SIGMA,
     CONF_COMFORT_BAND,
@@ -78,6 +79,7 @@ from .const import (
     UPDATE_INTERVAL,
     VACATION_NO_FORECAST_MARGIN,
 )
+from .core.cycling import CycleRate, closed_share, cycle_sample
 from .core.forecast import Forecast, fetch_forecast
 from .core.model import HourRecord, OnlineZoneModel, SurfaceSpec, ZoneSpec, gain_path, typical_gains, update_q_on
 from .core.planner import PlanResult, ZonePlanInput, charge_cost, plan, violations
@@ -145,6 +147,13 @@ def _valve_share(hass: HomeAssistant, entity_id: str) -> float | None:
     return None if v is None else min(1.0, max(0.0, v / 100.0))
 
 
+def _cycle_valve_entity(z: ZoneRuntime) -> str | None:
+    """Valve signal of a thermostat-controlled room for the burner cycling: its valve entity, else the thermostat."""
+    if not z.cfg.get(CONF_BT_CONTROL):
+        return None
+    return z.cfg.get(CONF_VALVE_ENTITY) or z.cfg.get(CONF_BT_ENTITY) or None
+
+
 def _or(value: float | None, default: float | None) -> float | None:
     """``value`` unless it is missing – unlike ``value or default`` this keeps 0.0."""
     return default if value is None else value
@@ -202,6 +211,7 @@ class ZoneRuntime:
     # between the 15-min samples); the samples in ``acc`` remain the fallback for hours not covered
     q_tw: HourlyIntegral = field(default_factory=HourlyIntegral)
     pump_tw: HourlyIntegral = field(default_factory=HourlyIntegral)
+    valve_tw: HourlyIntegral = field(default_factory=HourlyIntegral)  # burner cycling: is the room taking heat?
     # frozen sensor: change the model expects since the sensor last reported, and since when it counts as frozen
     silent_drift: float = 0.0
     stale_since: datetime | None = None
@@ -531,6 +541,14 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
         self._started = dt_util.utcnow()  # startup grace: sensors may come back a little later
         self._warmstart_running = False
         self.q_on_repaired = False
+        # burner starts per block hour (cycling inside a block), learned from the starts counter
+        self.cycle = CycleRate()
+        self._cyc_heat = HourlyIntegral()  # space-heating share of the house
+        self._cyc_dhw = HourlyIntegral()
+        self._cyc_hour: datetime | None = None
+        self._cyc_heat_before: float | None = None  # share of the hour before (a block's first hour is not learned)
+        self._starts_by_hour: dict[datetime, float] = {}
+        self._starts_since: datetime | None = None  # counter followed since (an hour seen only in part is skipped)
         self.warmstart_pending = False  # a zone starts from its prior: hold the release until the warm start
         self._failsafe_since: datetime | None = None
         self._failsafe_issue = False
@@ -587,6 +605,7 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
             zr.vacation = self.vacation
             self.zones[subentry.subentry_id] = zr
         self.q_on_repaired = bool(stored.get("q_on_repaired"))
+        self.cycle = CycleRate.from_dict(stored.get("cycle"))
         cs = stored.get("control_since")
         self.control_since = datetime.fromisoformat(cs) if cs else None
         outdoor = stored.get("outdoor") or {}
@@ -653,6 +672,7 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
             "events": self.events.to_list(),
             "control_since": self.control_since.isoformat() if self.control_since else None,
             "q_on_repaired": self.q_on_repaired,
+            "cycle": self.cycle.to_dict(),
             "outdoor": {
                 "bias": self.outdoor_bias.to_dict(),
                 "hour": self._outdoor_hour.isoformat() if self._outdoor_hour else None,
@@ -806,10 +826,11 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
         data, options = self.config_entry.data, self.config_entry.options
         ids = {
             data.get(CONF_FLOW_TEMP_SENSOR), data.get(CONF_HEATING_ACTIVE), data.get(CONF_RELEASE_ENTITY),
-            options.get(CONF_DHW_ENTITY),
+            options.get(CONF_DHW_ENTITY), options.get(CONF_BURNER_STARTS),
         }
         for z in self.zones.values():
             ids.add(z.cfg.get(CONF_VALVE_ENTITY))
+            ids.add(_cycle_valve_entity(z))
             ids.update(z.cfg.get(CONF_TEMP_SENSORS, []))
         ids.discard(None)
         ids.discard("")
@@ -819,6 +840,9 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
 
     @callback
     def _heat_changed(self, event: Event[EventStateChangedData]) -> None:
+        if event.data["entity_id"] == self.config_entry.options.get(CONF_BURNER_STARTS):
+            self._count_start(event)
+            return
         heating, flow = heating_inputs(self.hass, self.config_entry.data, self.config_entry.options)
         self._feed_heat(dt_util.utcnow(), heating, flow)
 
@@ -832,26 +856,79 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
             temp = zone_temp(self.hass, z)
             z.q_tw.set(now, None if temp is None else zone_q(self.hass, z, temp, heating, flow))
             z.pump_tw.set(now, pump)
+            if (eid := _cycle_valve_entity(z)) is not None:
+                z.valve_tw.set(now, _valve_share(self.hass, eid))
+        self._cyc_heat.set(now, None if heating is None else float(heating))
+        dhw = _is_on(self.hass, self.config_entry.options.get(CONF_DHW_ENTITY))
+        self._cyc_dhw.set(now, None if dhw is None else float(dhw))
+
+    def _count_start(self, event: Event[EventStateChangedData]) -> None:
+        """Burner starts per hour from the counter's increases (a reset or a jump is no start)."""
+        old, new = event.data["old_state"], event.data["new_state"]
+        now = dt_util.utcnow()
+        if self._starts_since is None:
+            self._starts_since = now
+        try:
+            delta = float(new.state) - float(old.state)  # type: ignore[union-attr]
+        except (AttributeError, TypeError, ValueError):
+            return
+        if 0 < delta <= 10:
+            hour = now.replace(minute=0, second=0, microsecond=0)
+            self._starts_by_hour[hour] = self._starts_by_hour.get(hour, 0.0) + delta
+            self._starts_by_hour = {h: v for h, v in self._starts_by_hour.items() if h >= hour - timedelta(hours=3)}
+
+    def _track_cycling(self, hour: datetime) -> None:
+        """A closed block hour is one more sample of the burner starts per block hour."""
+        options = self.config_entry.options
+        if self._starts_since is None and options.get(CONF_BURNER_STARTS):
+            self._starts_since = dt_util.utcnow()  # followed from now on: the running hour is only seen in part
+        prev = self._cyc_hour
+        if prev is not None and hour > prev:
+            heat = self._cyc_heat.mean(prev, TW_MIN_COVERED) if hour - prev == timedelta(hours=1) else None
+            dhw = self._cyc_dhw.mean(prev, TW_MIN_COVERED) if options.get(CONF_DHW_ENTITY) else None
+            bt = [z for z in self.zones.values() if z.cfg.get(CONF_BT_CONTROL)]
+            closed = closed_share([z.valve_tw.mean(prev, TW_MIN_COVERED) for z in bt])
+            followed = options.get(CONF_BURNER_STARTS) and self._starts_since is not None and self._starts_since <= prev
+            starts = self._starts_by_hour.get(prev, 0.0) if followed else None
+            sample = cycle_sample(heat, self._cyc_heat_before, dhw, closed, starts)
+            if sample is not None:
+                self.cycle.update(*sample, float(options.get(CONF_ANTI_CYCLE_MIN, DEFAULT_ANTI_CYCLE_MIN)))
+            self._cyc_heat_before = heat
+        if prev is None or hour > prev:
+            self._cyc_hour = hour
+
+    def cost_fn(self):
+        """The planner's cost function: the starts-vs-gas option and the burner starts per block hour."""
+        options = self.config_entry.options
+        lock = float(options.get(CONF_ANTI_CYCLE_MIN, DEFAULT_ANTI_CYCLE_MIN))
+        return charge_cost(starts_weight(options), cycle=self.cycle.rates(lock))
 
     async def async_warmstart(self, only_fresh: bool) -> dict[str, int]:
         """Learn zone models from recorder history (see warmstart.py). Never raises."""
-        from .warmstart import async_warmstart
+        from .warmstart import async_warm_cycle, async_warmstart
 
         if self._warmstart_running:
             return {}
         self._warmstart_running = True
         result: dict[str, int] = {}
         bias = self.outdoor_bias
+        cycle = self.cycle
         try:
             result = await async_warmstart(self, only_fresh)
         except Exception:
             _LOGGER.exception("Thermocast warm start failed")
+        try:
+            if not only_fresh or self.cycle.n == 0:
+                await async_warm_cycle(self)
+        except Exception:
+            _LOGGER.exception("Thermocast warm start of the burner cycling failed")
         finally:
             self._warmstart_running = False
             held, self.warmstart_pending = self.warmstart_pending, False
-        if any(result.values()) or self.outdoor_bias is not bias:
+        learned = any(result.values()) or self.outdoor_bias is not bias or self.cycle is not cycle
+        if learned:
             await self.async_save()
-        if any(result.values()) or held or self.outdoor_bias is not bias:
+        if learned or held:
             # plan with the learned model (and end the hold) – directly: a debounced request would delay
             # the next requested refresh (e.g. switching control on right after the setup)
             await self.async_refresh()
@@ -953,6 +1030,7 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
             t_out = self.forecast.t_out[idx] if idx is not None else None
         heating, flow = heating_inputs(hass, data, self.config_entry.options)
         self._feed_heat(now, heating, flow)  # integrates up to now – before an hour closes
+        self._track_cycling(hour)
 
         hour_closed = False
         for z in self.zones.values():
@@ -1219,7 +1297,7 @@ class ThermocastCoordinator(DataUpdateCoordinator[ThermocastData]):
         running = self.actuator.commanded if self.control_enabled else self.view_builder.shadow_on
         result: PlanResult = await self.hass.async_add_executor_job(
             partial(
-                plan, inputs, block_lengths=lengths, z=zval, cost_fn=charge_cost(starts_weight(self.config_entry.options)),
+                plan, inputs, block_lengths=lengths, z=zval, cost_fn=self.cost_fn(),
                 running=bool(running),
             )
         )

@@ -108,6 +108,11 @@ class TcDetails extends LitElement {
           ? html` · ${t(L, "r_anti_cycle", { v: r.anti_cycle_min })}`
           : nothing}
       </p>
+      ${r.cycle
+        ? html`<p class="entity">${t(L, r.cycle.n ? "r_cycle" : "r_cycle_prior", {
+            r0: fmtNum(r.cycle.r0, L, 2), r1: fmtNum(r.cycle.r1, L, 2), n: r.cycle.n,
+          })}</p>`
+        : nothing}
       <p class="entity">${t(L, "r_entity", { e: d.release_entity, s: state })}</p>
     </div>`;
   }

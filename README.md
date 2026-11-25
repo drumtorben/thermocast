@@ -141,6 +141,10 @@ manual changes.
   model has learned from the recorder history (a few seconds after the reload).
 - **Anti-cycling lock** (option, needs a burner starts sensor): if the boiler's restart after its lock would only
   run a few minutes before the block ends, the block ends just before it – one start saved.
+- **Cycling inside a block** (needs the burner starts sensor): an oversized boiler restarts within a block when few
+  rooms take heat. Thermocast learns the starts per block hour from the counter – per share of thermostat rooms with
+  their valve shut – and prices them in the plan (before anything is learned: one start per anti-cycling lock with
+  all thermostat rooms shut). The panel's rules card shows the learned rate.
 - **Minimum block** only limits how early a running block may end; blocks are planned from 2 h.
 - **Check the heating curve:** a block only heats if the controller asks for enough flow temperature. With a
   weather-compensated curve the target flow on mild days is often barely above room temperature – then the burner

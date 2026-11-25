@@ -44,7 +44,6 @@ from .const import (
 from .core.bt import MAX_TARGET, round_target
 from .core.explain import PlanSnapshot, plan_change, snapshot_from
 from .core.model import Prediction
-from .core.planner import charge_cost
 from .core.quality import hindcast
 from .core.rollout import ActuatorState, block_lengths_for
 from .core.rules import apply_rules, binary_value, hold_until, next_on_hours, release_value
@@ -187,6 +186,7 @@ class ViewBuilder:
         a = self._c.actuator
         rules = a.rules
         options = self._c.config_entry.options
+        r0, r1 = self._c.cycle.rates(float(options.get(CONF_ANTI_CYCLE_MIN, DEFAULT_ANTI_CYCLE_MIN)))
         return {
             "planner_wants": data.planner_heat,
             "applied": data.release_on,
@@ -203,6 +203,8 @@ class ViewBuilder:
                 "max_switches": rules.max_switches,
                 "starts_weight": float(options.get(CONF_STARTS_WEIGHT, DEFAULT_STARTS_WEIGHT)),
                 "anti_cycle_min": float(options.get(CONF_ANTI_CYCLE_MIN, DEFAULT_ANTI_CYCLE_MIN)),
+                # extra burner starts per block hour: r0 + r1 · share of thermostat rooms shut (n = learned hours)
+                "cycle": {"r0": round(r0, 2), "r1": round(r1, 2), "n": self._c.cycle.n},
             },
             "since_last_change_min": round(a.elapsed_h(now) * 60) if a.last_change else None,
             "forecast_age_min": _round(data.forecast_age_min, 0),
@@ -225,7 +227,6 @@ class ViewBuilder:
     async def _async_build(self, now: datetime, hour0: datetime, data: ThermocastData) -> dict[str, Any]:
         from .coordinator import (
             build_plan_inputs,
-            starts_weight,
             zone_base,
             zone_charge_cap,
             zone_comfort,
@@ -332,7 +333,7 @@ class ViewBuilder:
                 outlook = await hass.async_add_executor_job(
                     partial(
                         compute_outlook, inputs, steps, c.actuator.rules, state, day_index, hour0,
-                        z=zval, block_lengths=lengths, cost_fn=charge_cost(starts_weight(c.config_entry.options)),
+                        z=zval, block_lengths=lengths, cost_fn=c.cost_fn(),
                     )
                 )
                 snap = snapshot_from(outlook.rollout.first, outlook.first_inputs, hour0)

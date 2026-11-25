@@ -133,6 +133,10 @@ Untergrenze), mit **Ruhezeiten** (fest und/oder `schedule`-Helfer) ohne Stellger
   war, bis das Modell aus der Recorder-Historie gelernt hat (wenige Sekunden nach dem Neuladen).
 - **Taktsperre** (Option, mit Sensor *Brennerstarts*): Würde der Kessel nach seiner Sperrzeit nur noch wenige
   Minuten vor Blockende neu starten, endet der Block kurz davor – ein Start gespart.
+- **Takten im Block** (mit Sensor *Brennerstarts*): Ein überdimensionierter Kessel startet im Block neu, wenn wenige
+  Räume Wärme nehmen. Thermocast lernt die Starts je Blockstunde aus dem Zähler – je Anteil der Thermostat-Räume mit
+  geschlossenem Ventil – und rechnet sie in den Plan ein (solange nichts gelernt ist: ein Start je Taktsperre, wenn
+  alle Thermostat-Räume zu sind). Die Regel-Karte im Panel zeigt die gelernte Rate.
 - **Mindestblock** begrenzt nur, wann ein laufender Block frühestens enden darf; geplant werden Blöcke ab 2 h.
 - **Heizkurve prüfen:** Ein Block heizt nur, wenn der Regler genug Vorlauf verlangt. Mit einer witterungsgeführten
   Kurve liegt der Soll-Vorlauf an milden Tagen oft kaum über der Raumtemperatur – dann zündet der Brenner im Block

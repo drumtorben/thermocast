@@ -1,7 +1,7 @@
 """Setup, entities, fail-safe and actuation inside Home Assistant."""
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from homeassistant.config_entries import ConfigEntryState
@@ -10,6 +10,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.setup import async_setup_component
+from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
 from custom_components.thermocast.const import DOMAIN
@@ -518,3 +519,39 @@ def test_missing_vs_zero():
 
     assert _or(0.0, 20.5) == 0.0  # a neighbour at 0 °C is a value, not "missing"
     assert _or(None, 20.5) == 20.5
+
+
+async def test_block_hour_learns_burner_starts(
+    hass: HomeAssistant, mock_entry, mock_open_meteo, freezer, hass_storage
+) -> None:
+    """The starts counter's increases in a block hour (not the block's first hour) teach the cycling rate."""
+    from custom_components.thermocast.const import CONF_BURNER_STARTS
+
+    freezer.move_to("2026-10-04 09:05:00+00:00")
+    mock_open_meteo(-5.0)
+    await _setup_states(hass)
+    hass.states.async_set("binary_sensor.heating_pump", "on")
+    hass.states.async_set("sensor.flow", "45.0", {"device_class": "temperature"})
+    hass.states.async_set("sensor.burner_starts", "100")
+    mock_entry.add_to_hass(hass)
+    hass.config_entries.async_update_entry(mock_entry, options={CONF_BURNER_STARTS: "sensor.burner_starts"})
+    await _setup_entry(hass, mock_entry)
+    c = mock_entry.runtime_data
+    assert c.cycle.n == 0
+
+    counter = 100
+    while dt_util.utcnow() < datetime(2026, 10, 4, 11, 20, tzinfo=UTC):
+        freezer.tick(timedelta(minutes=10))
+        if dt_util.utcnow().hour == 10 and dt_util.utcnow().minute in (25, 55):
+            counter += 1  # two restarts inside the 10:00 hour
+            hass.states.async_set("sensor.burner_starts", str(counter))
+        async_fire_time_changed(hass)
+        await hass.async_block_till_done(wait_background_tasks=True)
+
+    # 09:00 was seen only in part (the counter is followed since 09:05); 10:00 is a block hour with two starts
+    assert c.cycle.n == 1 and c.cycle.last == {"closed": 0.0, "starts": 2.0}
+    freezer.tick(timedelta(seconds=61))  # debounced saves
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+    assert hass_storage[f"{DOMAIN}.{mock_entry.entry_id}"]["data"]["cycle"]["n"] == 1
+    assert c.view["decision"]["rules"]["cycle"]["n"] == 1

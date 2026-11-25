@@ -169,7 +169,8 @@ class PlanResult:
 #  block hours with the thermostat-controlled rooms closed – as a share of those rooms)
 CostFn = Callable[[Candidate, float, float, float, float], dict[str, float]]
 MIN_COAST_H = 2  # a "next block" sooner than this is no real pause – its violations stay with this candidate
-# with few open radiators the boiler only fires briefly and waits out its anti-cycling lock (≈ 45 min)
+# with few open radiators the boiler only fires briefly and waits out its anti-cycling lock (≈ 45 min);
+# the coordinator passes the learned rate (core/cycling.py) instead
 CYCLE_STARTS_PER_H = 60.0 / 45.0
 
 
@@ -186,7 +187,7 @@ def default_cost(
     return parts
 
 
-def charge_cost(weight: float) -> CostFn:
+def charge_cost(weight: float, cycle: tuple[float, float] = (0.0, CYCLE_STARTS_PER_H)) -> CostFn:
     """Charge and coast: ``weight`` 0 = little gas (short blocks), 1 = few burner starts (long blocks).
 
     A start costs 1…10, a block hour 0.5…0.15 – both **per day**: scaled by 24 h / (hours from now until the
@@ -196,10 +197,12 @@ def charge_cost(weight: float) -> CostFn:
     not lost before it is needed). Staying below the lower bound costs
     20 per K·h (leading zones), going above the upper bound 4 per K·h (all zones). Block hours in which the
     thermostat-controlled rooms are closed (at their cap, e.g. in quiet time) cost extra burner starts: few
-    consumers make the boiler cycle inside the block. Marked with ``coast = True``: the planner leaves
+    consumers make the boiler cycle inside the block. ``cycle`` = (r0, r1): extra burner starts per block hour
+    ``r0 + r1 · closed share`` (learned, core/cycling.py). Marked with ``coast = True``: the planner leaves
     violations after the coast to the next block.
     """
     w = min(1.0, max(0.0, weight))
+    r0, r1 = cycle
 
     def cost(
         candidate: Candidate, comfort_violation: float, overheat: float, coast_h: float, closed_h: float = 0.0
@@ -209,7 +212,7 @@ def charge_cost(weight: float) -> CostFn:
         if candidate.start is not None:
             per_day = 24.0 / max(1.0, candidate.start + candidate.length + coast_h)
             parts["start"] = 0.0 if candidate.continues else (1.0 + 9.0 * w) * per_day
-            parts["cycling"] = (1.0 + 9.0 * w) * per_day * CYCLE_STARTS_PER_H * closed_h
+            parts["cycling"] = (1.0 + 9.0 * w) * per_day * (r0 * candidate.length + r1 * closed_h)
             parts["energy"] = (0.5 - 0.35 * w) * candidate.length * per_day
         return parts
 
