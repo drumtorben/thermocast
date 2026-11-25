@@ -261,11 +261,20 @@ class TcTimeline extends LitElement {
     return this._frame(h, svg`${areas}${line(meas, "")}${line(fc, "4 3")}${axis}`, t(this.lang, "weather"));
   }
 
+  // share of hour i the boiler heated: burner time when a burner entity is set (the pump keeps running through the
+  // anti-cycling pause), else pump time; hot water excluded either way
+  _heatShare(i) {
+    const h = this.view.heating;
+    const b = (h.burner || [])[i];
+    return isNum(b) ? b : h.actual[i];
+  }
+
   _heatingLane() {
     const v = this.view;
     const h = 40;
     const now = v.window.now_index;
-    const bars = v.heating.actual.map((a, i) =>
+    const heat = v.heating.actual.map((_, i) => this._heatShare(i));
+    const bars = heat.map((a, i) =>
       i <= now && isNum(a) && a > 0
         ? svg`<rect x=${this._x(i)} y=${20 - 14 * a} width=${this._pph} height=${14 * a} fill=${C.heat}></rect>`
         : nothing,
@@ -273,7 +282,7 @@ class TcTimeline extends LitElement {
     // hot water is not space heating: stacked on top of the heating bar, at least 3 px so short charges show
     const dhw = (v.heating.dhw || []).map((a, i) => {
       if (!(i <= now && isNum(a) && a > 0)) return nothing;
-      const below = isNum(v.heating.actual[i]) ? 14 * v.heating.actual[i] : 0;
+      const below = isNum(heat[i]) ? 14 * heat[i] : 0;
       const hd = Math.max(3, 14 * a);
       return svg`<rect x=${this._x(i)} y=${20 - below - hd} width=${this._pph} height=${hd} fill="url(#tc-dhw)"
             stroke=${C.loss} stroke-width="0.6"><title>${t(this.lang, "dhw")} ${Math.round(a * 100)} %</title></rect>`;
@@ -473,17 +482,13 @@ class TcTimeline extends LitElement {
           : nothing}
       </div>`;
     });
-    const heat = i < now && isNum(v.heating.actual[i]) ? v.heating.actual[i] : null;
+    const heat = i < now && isNum(this._heatShare(i)) ? this._heatShare(i) : null;
     const dhw = i < now && isNum((v.heating.dhw || [])[i]) ? v.heating.dhw[i] : null;
-    // heating.actual is pump time: the boiler's anti-cycling pause keeps the pump running
-    const burner = i < now && isNum((v.heating.burner || [])[i]) ? v.heating.burner[i] : null;
     const starts = i < now && isNum((v.heating.starts || [])[i]) ? v.heating.starts[i] : null;
-    // with a burner entity "heating" is the burner time, the pump time goes in brackets
-    const heatMin = Math.round((burner !== null && heat ? burner : heat || 0) * 60);
-    const heatLine = heat || dhw
-      ? html`<div>${t(L, "heating")} ${heatMin} min${
-          burner !== null && heat ? html` (${t(L, "pump")} ${Math.round(heat * 60)} min)` : nothing
-        }${starts ? html` · ${t(L, "starts_n", { n: starts })}` : nothing}${
+    const heatLine = heat || dhw || starts
+      ? html`<div>${t(L, "heating")} ${Math.round((heat || 0) * 60)} min${
+          starts ? html` · ${t(L, "starts_n", { n: starts })}` : nothing
+        }${
           dhw ? html` · ${t(L, "dhw")} ${Math.round(dhw * 60)} min` : nothing
         }</div>`
       : nothing;

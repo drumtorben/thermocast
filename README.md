@@ -188,7 +188,7 @@ A sidebar panel answers: **why is Thermocast heating (or not) right now – and 
   per zone measured / plan ± σ / without heating / comfort window / thermostat target / quiet time.
   **"Why?"** splits every hour exactly into sun per surface, heating, losses, neighbours, gains (the model is linear).
   The tooltip shows the heating time and burner starts per past hour; with the option *Burner on* (e.g. EMS-ESP gas)
-  heating is the burner time and the pump time follows in brackets – the pump keeps running through the boiler's
+  heating (bars, tooltip, day cards) is the burner time instead of the pump time – the pump keeps running through the boiler's
   anti-cycling pause.
 - **Candidates** for the next block with their cost breakdown – hover draws the trajectory into the timeline.
 

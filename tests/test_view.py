@@ -202,6 +202,7 @@ def test_charge_fields_bt_targets_and_starts():
     assert all(z["bt_target"][i] == (21.5 if i in on else 20.0) for i in range(now, n))
     yesterday = v["days"][0]
     assert yesterday["starts"] == 3 and yesterday["starts_per_block"] == 3.0
+    assert yesterday["heat_hours"] == 2.0 and yesterday["blocks"] == 1  # burner time; the block is the pump's 4 h
     assert yesterday["over_high_max"] == -1.0  # measured 20.5 vs upper bound 21.5
     assert v["days"][2]["over_high_max"] is not None
     json.dumps(v)

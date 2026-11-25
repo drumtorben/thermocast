@@ -300,7 +300,12 @@ def build_view(
         past = [i for i in idx if i < now]
         fut = [i for i in idx if i >= now]
         kind = "past" if d < today else "today" if d == today else "future"
-        heat_vals = [heating_actual[i] for i in past if heating_actual[i] is not None]
+        # burner time when known (the pump keeps running through the anti-cycling pause), else pump time
+        heat_vals = [
+            burner[i] if burner and burner[i] is not None else heating_actual[i]
+            for i in past
+            if (burner and burner[i] is not None) or heating_actual[i] is not None
+        ]
         meas = [
             zv["measured"][i] for zv in leading for i in past
             if zv["comfort_low"][i] is not None and zv["measured"][i] is not None

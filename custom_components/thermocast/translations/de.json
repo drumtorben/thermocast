@@ -184,7 +184,7 @@
           "confidence_z": "Der Planer rechnet mit Mittelwert − z·σ der Prognose. Höher = vorsichtiger.",
           "dhw_active_entity": "Warmwasserladungen laufen über dieselbe Kesselpumpe mit heißem Vorlauf: Diese Zeiten zählen nicht als Heizen (Modell, Verlauf, Warmstart) und werden in der Zeitachse schraffiert. Empfohlen, wenn der Kessel auch den Speicher lädt.",
           "burner_starts_entity": "Gesamtzähler (State-Class total_increasing), z. B. EMS-ESP Brennerstarts. Für die KPIs.",
-          "burner_active_entity": "Brenner/Flamme aktiv (an/aus oder > 0), z. B. EMS-ESP Gas oder aktuelle Brennerleistung. Der Tooltip der Zeitachse zählt dann die Brennerzeit als Heizen, die Pumpenzeit in Klammern – die Pumpe läuft in der Taktsperre des Kessels weiter.",
+          "burner_active_entity": "Brenner/Flamme aktiv (an/aus oder > 0), z. B. EMS-ESP Gas oder aktuelle Brennerleistung. Das Panel zählt dann die Brennerzeit als Heizen statt der Pumpenzeit – die Pumpe läuft in der Taktsperre des Kessels weiter.",
           "heat_energy_entity": "Gesamte Heizenergie (kWh, total_increasing), z. B. EMS-ESP Energie Heizung. Für kWh pro Heizgradtag.",
           "calibrate_sigma": "Weitet σ je Prognosehorizont so, dass ±σ etwa 68 % der in den letzten 14 Tagen beobachteten Prognosefehler abdeckt (braucht ≥ 48 Prüfungen je Horizont; verengt nie).",
           "starts_weight": "0 = kurze Blöcke, wenig Gas; 100 = wenige lange Blöcke, die die Räume bis zur Obergrenze laden.",

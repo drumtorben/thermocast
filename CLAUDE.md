@@ -246,7 +246,7 @@ Attr. Parameter + Sonnenantwort je Fläche).
 
 ---
 
-## 4. Status (v0.10.3)
+## 4. Status (v0.10.4)
 
 - ✅ Kern getestet auf synthetischen Daten: 1-Schritt-MAE ≈ 0,03 K/h, 24-h-Prognose-MAE ≈ 0,1 K,
   Ostfenster und Süddach werden getrennt gelernt, Planer heizt bei −5 °C, nicht bei 18 °C.
@@ -365,8 +365,9 @@ Attr. Parameter + Sonnenantwort je Fläche).
   v0.10.1: eingefrorener Fühler (nicht lernen, nicht führen, alle führenden → Fail-safe); Ventilöffnung in der Ruhezeit
   (TRV-Grenze vorher auf X %, danach 100 %).
   v0.10.2: Tooltip der Zeitachse zeigt Brennerminuten (Option `burner_active_entity`, z. B. EMS-ESP Gas, ohne WW) und
-  Starts je Stunde – die Pumpe läuft in der Taktsperre weiter. v0.10.3: mit Brenner-Entität ist „Heizen“ die Brennerzeit,
-  Pumpe in Klammern (Blöcke/Heizstunden der Tageskarten bleiben Pumpenzeit). Nur Anzeige; Modell/Planer
+  Starts je Stunde – die Pumpe läuft in der Taktsperre weiter. v0.10.3: mit Brenner-Entität ist „Heizen“ die Brennerzeit.
+  v0.10.4: Pumpenzeit gar nicht mehr angezeigt – Balkenhöhe, Tooltip und Heizstunden der Tageskarten = Brennerzeit
+  (ohne Brenner-Entität Pumpenzeit); vergangene Blöcke bleiben Pumpe ≥ 50 %. Nur Anzeige; Modell/Planer
   bleiben beim Pumpen-Proxy (Vorlauf fällt in der Pause, das zeitgewichtete Q sinkt von selbst).
 - Bekannte Schwächen:
   - Prognose nutzt aktuelle Nachbartemperaturen als konstant über den Horizont (Gewinne: Tagesprofil, s. o.).
