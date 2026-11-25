@@ -187,6 +187,8 @@ A sidebar panel answers: **why is Thermocast heating (or not) right now – and 
 - **Timeline** (yesterday 00:00 → tomorrow 24:00): weather (sun per surface), past and planned blocks, events,
   per zone measured / plan ± σ / without heating / comfort window / thermostat target / quiet time.
   **"Why?"** splits every hour exactly into sun per surface, heating, losses, neighbours, gains (the model is linear).
+  The tooltip shows the heating pump time per past hour, plus burner minutes (option *Burner on*, e.g. EMS-ESP gas –
+  the pump keeps running through the boiler's anti-cycling pause) and burner starts.
 - **Candidates** for the next block with their cost breakdown – hover draws the trajectory into the timeline.
 
 ![Why? – every hour split into its causes](docs/images/why.png)

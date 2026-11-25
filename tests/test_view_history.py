@@ -47,6 +47,33 @@ async def test_view_built_with_recorder(hass: HomeAssistant, mock_entry, mock_op
     assert view["weather"]["irr"][0]["label"] == "East"
 
 
+async def test_view_burner_time_beside_pump_time(hass: HomeAssistant, mock_entry, mock_open_meteo, freezer) -> None:
+    """The pump runs through the boiler's anti-cycling pause; the burner entity tells the burner minutes."""
+    from custom_components.thermocast.const import CONF_BURNER_ACTIVE
+
+    freezer.move_to("2026-10-04 08:00:00+00:00")
+    await _setup_states(hass)
+    hass.states.async_set("binary_sensor.heating_pump", "on")
+    hass.states.async_set("binary_sensor.burner_gas", "on")
+    await async_wait_recording_done(hass)
+    freezer.move_to("2026-10-04 08:15:00+00:00")
+    hass.states.async_set("binary_sensor.burner_gas", "off")  # anti-cycling pause, pump keeps running
+    await async_wait_recording_done(hass)
+    freezer.move_to("2026-10-04 08:45:00+00:00")
+    hass.states.async_set("binary_sensor.burner_gas", "on")
+    await async_wait_recording_done(hass)
+    freezer.move_to("2026-10-04 09:35:00+00:00")
+    mock_open_meteo(-5.0)
+    mock_entry.add_to_hass(hass)
+    hass.config_entries.async_update_entry(mock_entry, options={CONF_BURNER_ACTIVE: "binary_sensor.burner_gas"})
+    await _setup_entry(hass, mock_entry)
+
+    view = mock_entry.runtime_data.view
+    i8 = view["hours"].index("2026-10-04T08:00:00+00:00")
+    assert view["heating"]["actual"][i8] == 1.0
+    assert view["heating"]["burner"][i8] == pytest.approx(0.5)
+
+
 async def test_view_frost_protection_pump_is_no_heating(hass: HomeAssistant, mock_entry, mock_open_meteo, freezer) -> None:
     freezer.move_to("2026-10-04 08:30:00+00:00")
     await _setup_states(hass)

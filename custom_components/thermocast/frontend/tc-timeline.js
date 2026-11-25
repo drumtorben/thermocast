@@ -475,8 +475,13 @@ class TcTimeline extends LitElement {
     });
     const heat = i < now && isNum(v.heating.actual[i]) ? v.heating.actual[i] : null;
     const dhw = i < now && isNum((v.heating.dhw || [])[i]) ? v.heating.dhw[i] : null;
+    // pump time; the boiler's anti-cycling pause keeps the pump running, so burner time and starts come separately
+    const burner = i < now && isNum((v.heating.burner || [])[i]) ? v.heating.burner[i] : null;
+    const starts = i < now && isNum((v.heating.starts || [])[i]) ? v.heating.starts[i] : null;
     const heatLine = heat || dhw
       ? html`<div>${t(L, "heating")} ${Math.round((heat || 0) * 60)} min${
+          burner !== null && heat ? html` · ${t(L, "burner")} ${Math.round(burner * 60)} min` : nothing
+        }${starts ? html` · ${t(L, "starts_n", { n: starts })}` : nothing}${
           dhw ? html` · ${t(L, "dhw")} ${Math.round(dhw * 60)} min` : nothing
         }</div>`
       : nothing;

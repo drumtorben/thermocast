@@ -24,6 +24,7 @@ from .const import (
     CONF_BASE_TEMP,
     CONF_BT_CONTROL,
     CONF_BT_ENTITY,
+    CONF_BURNER_ACTIVE,
     CONF_BURNER_STARTS,
     CONF_CALIBRATE_SIGMA,
     CONF_COMFORT_BAND,
@@ -143,6 +144,9 @@ def _options_schema(options: dict[str, Any]) -> vol.Schema:
                 selector.EntitySelectorConfig(domain=["binary_sensor", "switch", "sensor"])
             ),
             vol.Optional(CONF_BURNER_STARTS): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor")),
+            vol.Optional(CONF_BURNER_ACTIVE): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain=["binary_sensor", "switch", "sensor"])
+            ),
             vol.Optional(CONF_HEAT_ENERGY): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor", device_class="energy")
             ),

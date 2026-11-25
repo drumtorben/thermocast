@@ -264,6 +264,7 @@ def build_view(
     errors: list[str],
     dhw: list[float | None] | None = None,
     burner_starts: list[float | None] | None = None,  # burner starts per past hour (counter increase)
+    burner: list[float | None] | None = None,  # share of the past hour the burner ran for space heating
     vacation: Vacation | None = None,
     vacation_entity: str | None = None,  # the return's entity (the banner opens it)
 ) -> dict[str, Any]:
@@ -374,6 +375,8 @@ def build_view(
             "release": release,
             "planner": planner,
             "dhw": dhw if dhw is not None else [None] * n,
+            "burner": burner if burner is not None else [None] * n,
+            "starts": [None if s is None else round(s) for s in burner_starts] if burner_starts else [None] * n,
             "past_blocks": [{"start": iso(s), "end": iso(e)} for s, e in _runs(past_flags)],
             "planned_blocks": [{"start": iso(s), "end": iso(e)} for s, e in _runs([bool(o) for o in on_plan])],
         },

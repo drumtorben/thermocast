@@ -246,7 +246,7 @@ Attr. Parameter + Sonnenantwort je Fläche).
 
 ---
 
-## 4. Status (v0.10.1)
+## 4. Status (v0.10.2)
 
 - ✅ Kern getestet auf synthetischen Daten: 1-Schritt-MAE ≈ 0,03 K/h, 24-h-Prognose-MAE ≈ 0,1 K,
   Ostfenster und Süddach werden getrennt gelernt, Planer heizt bei −5 °C, nicht bei 18 °C.
@@ -364,6 +364,9 @@ Attr. Parameter + Sonnenantwort je Fläche).
   Ruhezeit, offen = BT 24 und im Planer ungedeckelt, nachts keine Motorbewegung; Panel zeigt 24 und „Ventil offen“.
   v0.10.1: eingefrorener Fühler (nicht lernen, nicht führen, alle führenden → Fail-safe); Ventilöffnung in der Ruhezeit
   (TRV-Grenze vorher auf X %, danach 100 %).
+  v0.10.2: Tooltip der Zeitachse zeigt neben der Pumpenzeit („Heizen“) Brennerminuten (Option `burner_active_entity`,
+  z. B. EMS-ESP Gas, ohne WW) und Starts je Stunde – die Pumpe läuft in der Taktsperre weiter. Nur Anzeige; Modell/Planer
+  bleiben beim Pumpen-Proxy (Vorlauf fällt in der Pause, das zeitgewichtete Q sinkt von selbst).
 - Bekannte Schwächen:
   - Prognose nutzt aktuelle Nachbartemperaturen als konstant über den Horizont (Gewinne: Tagesprofil, s. o.).
   - Ein Gerät, das kühlt (z. B. Klimagerät im Sommer), meldet als Leistungssensor positive Watt – Gewinne sind ≥ 0;

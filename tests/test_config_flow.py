@@ -10,6 +10,7 @@ from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.thermocast.const import (
+    CONF_BURNER_ACTIVE,
     CONF_BURNER_STARTS,
     CONF_CALIBRATE_SIGMA,
     CONF_CONFIDENCE_Z,
@@ -197,6 +198,7 @@ async def test_options_flow_panel_sources(hass: HomeAssistant, mock_entry: MockC
     sources = {
         CONF_DHW_ENTITY: "binary_sensor.dhw_active",
         CONF_BURNER_STARTS: "sensor.burner_starts",
+        CONF_BURNER_ACTIVE: "binary_sensor.burner_gas",
         CONF_HEAT_ENERGY: "sensor.energy_heating",
     }
     result = await hass.config_entries.options.async_init(mock_entry.entry_id)

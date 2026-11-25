@@ -18,6 +18,7 @@ from .const import (
     CONF_ANTI_CYCLE_MIN,
     CONF_BT_CONTROL,
     CONF_BT_ENTITY,
+    CONF_BURNER_ACTIVE,
     CONF_BURNER_STARTS,
     CONF_CONFIDENCE_Z,
     CONF_DHW_ENTITY,
@@ -253,9 +254,10 @@ class ViewBuilder:
         outdoor, pump, rel = cfg.get(CONF_OUTDOOR_SENSOR), cfg.get(CONF_HEATING_ACTIVE), cfg.get(CONF_RELEASE_ENTITY)
         dhw_eid = c.config_entry.options.get(CONF_DHW_ENTITY)
         starts_eid = c.config_entry.options.get(CONF_BURNER_STARTS)
+        burner_eid = c.config_entry.options.get(CONF_BURNER_ACTIVE)
         flow_eid = cfg.get(CONF_FLOW_TEMP_SENSOR)
         wanted = {e for lst in sensors.values() for e in lst} | {
-            outdoor, pump, rel, planner_eid, dhw_eid, starts_eid, flow_eid,
+            outdoor, pump, rel, planner_eid, dhw_eid, starts_eid, burner_eid, flow_eid,
         }
 
         states = await async_fetch_states(hass, {e for e in wanted if e}, hours[0], now)
@@ -287,6 +289,13 @@ class ViewBuilder:
         if dhw_eid and flow_states:
             flow_states = mask_off(flow_states, states.get(dhw_eid, []), binary_value)
         heating_actual = without_idle_circulation(heating_actual, release_share, hourly_mean(flow_states, hours, now))
+        # the pump keeps running through the boiler's anti-cycling pauses: the flame tells the burner time
+        burner = None
+        if burner_eid:
+            burner_states = states.get(burner_eid, [])
+            if dhw_eid and burner_states:
+                burner_states = mask_off(burner_states, states.get(dhw_eid, []), binary_value)
+            burner = hourly_fraction(burner_states, hours, now, binary_value)
         t_meas = mean_of(outdoor)
 
         # ------------------------------------------------------------ forecast
@@ -394,6 +403,7 @@ class ViewBuilder:
             z=zval, decision=self._decision(now, data), plan_change=change, events=self._events(), errors=errors,
             dhw=fraction_of(dhw_eid, binary_value) if dhw_eid else None,
             burner_starts=hourly_increase(states.get(starts_eid, []), hours, now) if starts_eid else None,
+            burner=burner,
             vacation=c.vacation,
             vacation_entity=er.async_get(hass).async_get_entity_id(
                 "datetime", DOMAIN, f"{c.config_entry.entry_id}_vacation_end"

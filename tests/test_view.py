@@ -189,7 +189,11 @@ def test_charge_fields_bt_targets_and_starts():
         release=[None] * n, planner=[None] * n, zones=[zvi], outlook=out, z=1.0,
         decision={"override": "observe", "bt": {"eg": {"target": 21.5, "reason": "observe"}}},
         plan_change=None, events=[], errors=[], burner_starts=starts,
+        burner=[0.5 if 3 <= i < 7 else 0.0 if i < now else None for i in range(n)],
     )
+    # pump ran the whole hour, the burner half of it (anti-cycling pause)
+    assert v["heating"]["actual"][4] == 1.0 and v["heating"]["burner"][4] == 0.5
+    assert v["heating"]["starts"][4] == 3 and v["heating"]["starts"][now] is None
     z = v["zones"][0]
     assert z["comfort_high"] == [21.5] * n and z["floor"][0] == 18.0 and z["quiet"][now] is False and z["quiet"][now + 2] is True
     assert z["bt_control"] is True and z["bt_target"][0] == 19.0
