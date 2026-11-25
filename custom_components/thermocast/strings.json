@@ -184,7 +184,7 @@
           "confidence_z": "Planner uses mean − z·σ of the forecast. Higher = more cautious.",
           "dhw_active_entity": "Hot water charging runs the boiler pump with a hot flow: these times do not count as space heating (model, history, warm start) and are shaded in the timeline. Recommended for combi boilers.",
           "burner_starts_entity": "Total counter (state class total_increasing), e.g. EMS-ESP burner starts. Used for KPIs.",
-          "burner_active_entity": "Burner/flame active (on/off or > 0), e.g. EMS-ESP gas or current burner power. The timeline tooltip then shows burner minutes next to the pump time – the pump keeps running through the boiler's anti-cycling pause.",
+          "burner_active_entity": "Burner/flame active (on/off or > 0), e.g. EMS-ESP gas or current burner power. The timeline tooltip then counts the burner time as heating, the pump time in brackets – the pump keeps running through the boiler's anti-cycling pause.",
           "heat_energy_entity": "Total heating energy (kWh, total_increasing), e.g. EMS-ESP energy heating. Used for kWh per heating degree day.",
           "calibrate_sigma": "Widens σ per forecast horizon so that ±σ covers ~68 % of the forecast errors observed in the last 14 days (needs ≥ 48 checks per horizon; never narrows it).",
           "starts_weight": "0 = short blocks, little gas; 100 = few long blocks that charge the rooms up to their upper bound.",

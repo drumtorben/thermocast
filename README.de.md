@@ -200,8 +200,8 @@ Die Integration bringt ein eigenes Seitenpanel mit (Sidebar → *Thermocast*), d
   gelaufene und geplante Blöcke, Ereignisse (Fenster offen, Fail-safe, Prognosefehler, Steuerung an/aus …),
   je Zone gemessen / Plan ± σ / ohne Heizen / Komfortfenster. **„Warum?“** zerlegt jede künftige Stunde
   exakt in Sonne je Fläche, Heizen, Verlust, Nachbarn, Gewinne (das Modell ist linear). Fadenkreuz-Tooltip über alle Bahnen;
-  er zeigt je vergangene Stunde die Pumpenzeit („Heizen“), dazu Brennerminuten (Option *Brenner an*, z. B. EMS-ESP Gas –
-  die Pumpe läuft in der Taktsperre weiter) und Brennerstarts.
+  er zeigt je vergangene Stunde Heizzeit und Brennerstarts; mit der Option *Brenner an* (z. B. EMS-ESP Gas) ist Heizen
+  die Brennerzeit, die Pumpenzeit steht in Klammern – die Pumpe läuft in der Taktsperre weiter.
 - **Kandidaten** für den nächsten Block mit Kostenaufschlüsselung – Hover zeichnet den Verlauf in die Zeitachse –
   und **Aktor-Regeln**.
 
